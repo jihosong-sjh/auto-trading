@@ -65,6 +65,17 @@ class FakeExchange:
         """
         return self.prices.get(stock_code)
 
+    def get_current_price(self, stock_code: str) -> Optional[Decimal]:
+        """종목의 현재가를 조회합니다 (get_price의 별칭).
+
+        Args:
+            stock_code: 종목코드.
+
+        Returns:
+            현재가. 종목이 없으면 None.
+        """
+        return self.get_price(stock_code)
+
     def execute_market_order(self, order: Order) -> Order:
         """시장가 주문을 즉시 체결합니다.
 
@@ -198,3 +209,24 @@ class FakeExchange:
             spread = price * Decimal("0.001")
             self.bid_prices[stock_code] = price - spread
             self.ask_prices[stock_code] = price + spread
+
+    def execute_order(self, order: Order) -> Order:
+        """주문을 체결합니다.
+
+        주문 유형(시장가/지정가)에 따라 적절한 체결 메서드를 호출합니다.
+
+        Args:
+            order: 체결할 주문 객체.
+
+        Returns:
+            체결된 주문 객체.
+
+        Raises:
+            ValueError: 유효하지 않은 주문 유형.
+        """
+        if order.price_type == PriceType.MARKET:
+            return self.execute_market_order(order)
+        elif order.price_type == PriceType.LIMIT:
+            return self.execute_limit_order(order)
+        else:
+            raise ValueError(f"Invalid price type: {order.price_type}")

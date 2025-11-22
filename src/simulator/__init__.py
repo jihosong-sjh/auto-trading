@@ -4,5 +4,6 @@
 """
 
 from .fake_exchange import FakeExchange
+from .kiwoom_simulator import KiwoomSimulator
 
-__all__ = ["FakeExchange"]
+__all__ = ["FakeExchange", "KiwoomSimulator"]

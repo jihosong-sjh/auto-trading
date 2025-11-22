@@ -81,26 +81,26 @@
 
 **목적**: 실제 KiwoomClient와 동일한 인터페이스를 가지지만, 모든 동작이 메모리 상에서 이루어지는 Fake Object를 구현합니다.
 
-- [ ] T017 KiwoomSimulator 기본 클래스 구현 in src/simulator/kiwoom_simulator.py
+- [X] T017 KiwoomSimulator 기본 클래스 구현 in src/simulator/kiwoom_simulator.py
   - `__init__(initial_balance: Decimal)` 생성자
   - 내부 상태: 계좌(Account), 포지션(List[Position]), 주문 이력(List[Order])
   - FakeExchange 인스턴스 보유
-- [ ] T018 `get_account() -> Account` 메서드 구현 in src/simulator/kiwoom_simulator.py
+- [X] T018 `get_account() -> Account` 메서드 구현 in src/simulator/kiwoom_simulator.py
   - 현재 예수금 반환
   - 총 평가액 계산 (예수금 + 모든 포지션 평가액)
   - 총 손익 계산
-- [ ] T019 `get_positions() -> List[Position]` 메서드 구현 in src/simulator/kiwoom_simulator.py
+- [X] T019 `get_positions() -> List[Position]` 메서드 구현 in src/simulator/kiwoom_simulator.py
   - 현재 보유 중인 모든 포지션 반환
   - 각 포지션의 현재가는 FakeExchange에서 조회
-- [ ] T020 `submit_order(order: Order) -> Order` 메서드 구현 in src/simulator/kiwoom_simulator.py
+- [X] T020 `submit_order(order: Order) -> Order` 메서드 구현 in src/simulator/kiwoom_simulator.py
   - 매수 주문 시 예수금 확인
   - 매도 주문 시 보유 수량 확인
   - FakeExchange에 주문 전달하여 체결
   - 체결 결과에 따라 잔고 및 포지션 업데이트
   - 주문 이력에 저장
-- [ ] T021 `get_stock_price(stock_code: str) -> Stock` 메서드 구현 in src/simulator/kiwoom_simulator.py
+- [X] T021 `get_stock_price(stock_code: str) -> Stock` 메서드 구현 in src/simulator/kiwoom_simulator.py
   - FakeExchange에서 현재가 조회
-- [ ] T022 오류 시나리오 시뮬레이션 기능 추가 in src/simulator/kiwoom_simulator.py
+- [X] T022 오류 시나리오 시뮬레이션 기능 추가 in src/simulator/kiwoom_simulator.py
   - `inject_error(error_type: str)` 메서드
   - 예수금 부족 에러 시뮬레이션
   - 잘못된 종목 코드 에러 시뮬레이션
