@@ -64,16 +64,16 @@
 
 **목적**: 실제 거래소의 호가창과 체결 로직을 메모리 상에서 시뮬레이션합니다.
 
-- [ ] T013 FakeExchange 기본 클래스 구현 in src/simulator/fake_exchange.py
+- [X] T013 FakeExchange 기본 클래스 구현 in src/simulator/fake_exchange.py
   - 종목별 현재가 관리 (Dict[종목코드, 가격])
   - 호가창 시뮬레이션 (매수호가, 매도호가)
-- [ ] T014 시장가 주문 체결 로직 구현 in src/simulator/fake_exchange.py
+- [X] T014 시장가 주문 체결 로직 구현 in src/simulator/fake_exchange.py
   - 매수 시장가 주문 → 즉시 현재가로 체결
   - 매도 시장가 주문 → 즉시 현재가로 체결
-- [ ] T015 지정가 주문 체결 로직 구현 in src/simulator/fake_exchange.py
+- [X] T015 지정가 주문 체결 로직 구현 in src/simulator/fake_exchange.py
   - 매수 지정가 주문 → 현재가 ≤ 지정가일 때 체결
   - 매도 지정가 주문 → 현재가 ≥ 지정가일 때 체결
-- [ ] T016 가격 변동 시뮬레이션 기능 추가 in src/simulator/fake_exchange.py
+- [X] T016 가격 변동 시뮬레이션 기능 추가 in src/simulator/fake_exchange.py
   - `set_price(종목코드, 가격)` 메서드
   - `tick()` 메서드 (시간 경과 시뮬레이션)
 
