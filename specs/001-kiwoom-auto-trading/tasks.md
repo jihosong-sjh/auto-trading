@@ -110,18 +110,18 @@
 
 **목적**: Simulator가 정확하게 동작하는지 검증합니다. 전략 테스트 이전에 Simulator 자체의 신뢰성을 확보해야 합니다.
 
-- [ ] T023 [P] FakeExchange 시장가 체결 테스트 in tests/simulator/test_fake_exchange.py
+- [X] T023 [P] FakeExchange 시장가 체결 테스트 in tests/simulator/test_fake_exchange.py
   - 매수/매도 시장가 주문이 즉시 체결되는지 확인
-- [ ] T024 [P] FakeExchange 지정가 체결 테스트 in tests/simulator/test_fake_exchange.py
+- [X] T024 [P] FakeExchange 지정가 체결 테스트 in tests/simulator/test_fake_exchange.py
   - 가격 조건 충족 시에만 체결되는지 확인
-- [ ] T025 [P] KiwoomSimulator 잔고 관리 테스트 in tests/simulator/test_kiwoom_simulator.py
+- [X] T025 [P] KiwoomSimulator 잔고 관리 테스트 in tests/simulator/test_kiwoom_simulator.py
   - 매수 후 예수금 감소 확인
   - 매도 후 예수금 증가 확인
-- [ ] T026 [P] KiwoomSimulator 포지션 관리 테스트 in tests/simulator/test_kiwoom_simulator.py
+- [X] T026 [P] KiwoomSimulator 포지션 관리 테스트 in tests/simulator/test_kiwoom_simulator.py
   - 매수 후 포지션 생성 확인
   - 매도 후 포지션 수량 감소 확인
   - 전량 매도 시 포지션 제거 확인
-- [ ] T027 [P] KiwoomSimulator 오류 시나리오 테스트 in tests/simulator/test_kiwoom_simulator.py
+- [X] T027 [P] KiwoomSimulator 오류 시나리오 테스트 in tests/simulator/test_kiwoom_simulator.py
   - 예수금 부족 시 주문 거부 확인
   - 보유 수량 부족 시 매도 거부 확인
 
