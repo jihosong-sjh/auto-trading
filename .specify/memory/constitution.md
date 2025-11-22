@@ -30,6 +30,7 @@
   - `print()` 사용을 금지한다. 반드시 `logging` 모듈을 사용한다.
   - 주문 실행(Buy/Sell)과 관련된 모든 로그는 `INFO` 레벨 이상으로 기록하며, 타임스탬프, 종목코드, 가격, 수량을 반드시 포함한다.
 
-## 5. 테스트 (Testing)
-- 새로운 기능을 추가할 때는 반드시 단위 테스트(Unit Test)를 함께 작성한다.
-- 외부 API를 사용하는 테스트는 `mock`을 사용하여 실제 요청을 보내지 않도록 한다.
+## 5. 테스트 (Testing) - **수정됨**
+- **Fakes over Mocks:** 외부 API 의존성 테스트 시 단순 Mocking(`unittest.mock`)보다는 상태를 가진 **Fake Object(Simulator)** 사용을 우선한다.
+- **Contract Testing:** 외부 API와 Fake Object의 동작이 일치하는지 검증하는 계약 테스트(Contract Test)를 유지한다.
+- **Integration First:** 단위 테스트보다 주요 컴포넌트(전략 <-> 실행기 <-> API)가 유기적으로 연결되는지 확인하는 통합 테스트에 비중을 둔다.
