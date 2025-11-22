@@ -54,11 +54,11 @@
 
 ### 2.1 기본 데이터 모델 (Simulator와 실제 API가 공유)
 
-- [ ] T008 [P] Enum 정의 in src/models/__init__.py (OrderType, OrderStatus, PriceType)
-- [ ] T009 [P] Stock 모델 구현 in src/models/stock.py (종목코드, 현재가, 거래량, 타임스탬프)
-- [ ] T010 [P] Account 모델 구현 in src/models/account.py (예수금, 총 평가액, 총 손익)
-- [ ] T011 [P] Order 모델 구현 in src/models/order.py (주문ID, 종목코드, 주문유형, 가격, 수량, 상태, 체결가, 체결수량)
-- [ ] T012 [P] Position 모델 구현 in src/models/position.py (종목코드, 수량, 평균매수가, 현재가, 손익, 수익률)
+- [X] T008 [P] Enum 정의 in src/models/__init__.py (OrderType, OrderStatus, PriceType)
+- [X] T009 [P] Stock 모델 구현 in src/models/stock.py (종목코드, 현재가, 거래량, 타임스탬프)
+- [X] T010 [P] Account 모델 구현 in src/models/account.py (예수금, 총 평가액, 총 손익)
+- [X] T011 [P] Order 모델 구현 in src/models/order.py (주문ID, 종목코드, 주문유형, 가격, 수량, 상태, 체결가, 체결수량)
+- [X] T012 [P] Position 모델 구현 in src/models/position.py (종목코드, 수량, 평균매수가, 현재가, 손익, 수익률)
 
 ### 2.2 FakeExchange (가상 거래소 엔진)
 
