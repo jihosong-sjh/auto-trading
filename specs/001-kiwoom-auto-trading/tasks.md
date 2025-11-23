@@ -137,23 +137,23 @@
 
 ### 3.1 핵심 유틸리티 및 설정
 
-- [ ] T028 [P] 로깅 설정 구현 in src/utils/logger.py (Google Style Docstring, logging 모듈 사용)
-- [ ] T029 [P] 시간대 처리 유틸리티 구현 in src/utils/time_utils.py (KST 타임존, 장 운영 시간 체크)
-- [ ] T030 [P] Decimal 계산 헬퍼 함수 구현 in src/utils/decimal_utils.py
-- [ ] T031 Pydantic Settings 기반 설정 관리 구현 in src/config/settings.py (config.yaml 로드, 환경 변수 처리)
+- [X] T028 [P] 로깅 설정 구현 in src/utils/logger.py (Google Style Docstring, logging 모듈 사용)
+- [X] T029 [P] 시간대 처리 유틸리티 구현 in src/utils/time_utils.py (KST 타임존, 장 운영 시간 체크)
+- [X] T030 [P] Decimal 계산 헬퍼 함수 구현 in src/utils/decimal_utils.py
+- [X] T031 Pydantic Settings 기반 설정 관리 구현 in src/config/settings.py (config.yaml 로드, 환경 변수 처리)
 
 ### 3.2 추가 데이터 모델
 
-- [ ] T032 [P] ChartData 모델 구현 in src/models/chart_data.py
-- [ ] T033 [P] Notification 모델 구현 in src/models/notification.py
-- [ ] T034 [P] SystemStatus 모델 구현 in src/models/system_status.py
-- [ ] T035 BaseStrategy 추상 클래스 구현 in src/models/strategy.py (evaluate_buy_signal, evaluate_sell_signal, calculate_position_size 추상 메서드)
+- [X] T032 [P] ChartData 모델 구현 in src/models/chart_data.py
+- [X] T033 [P] Notification 모델 구현 in src/models/notification.py
+- [X] T034 [P] SystemStatus 모델 구현 in src/models/system_status.py
+- [X] T035 BaseStrategy 추상 클래스 구현 in src/models/strategy.py (evaluate_buy_signal, evaluate_sell_signal, calculate_position_size 추상 메서드)
 
 ### 3.3 데이터베이스 및 저장소 (선택 사항, 초기 MVP에서는 생략 가능)
 
-- [ ] T036 SQLite 스키마 정의 및 초기화 in src/repositories/database.py
-- [ ] T037 [P] OrderRepository 구현 in src/repositories/order_repository.py
-- [ ] T038 [P] PositionRepository 구현 in src/repositories/position_repository.py
+- [X] T036 SQLite 스키마 정의 및 초기화 in src/repositories/database.py
+- [X] T037 [P] OrderRepository 구현 in src/repositories/order_repository.py
+- [X] T038 [P] PositionRepository 구현 in src/repositories/position_repository.py
 
 **Checkpoint**: 기반 인프라 준비 완료
 
