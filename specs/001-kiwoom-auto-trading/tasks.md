@@ -294,10 +294,10 @@
 
 ### 8.1 위험 관리자 (RiskManager)
 
-- [ ] T079 [US5] RiskManager 구현 in src/services/risk_manager.py
-- [ ] T080 [US5] check_daily_loss_limit 메서드 구현 (일일 손실 한도 80% 도달 시 경고)
-- [ ] T081 [US5] check_position_concentration 메서드 구현 (종목별 최대 30% 집중도 체크)
-- [ ] T082 [US5] should_stop_trading 메서드 구현 (손실 한도 초과 시 즉시 중단)
+- [X] T079 [US5] RiskManager 구현 in src/services/risk_manager.py
+- [X] T080 [US5] check_daily_loss_limit 메서드 구현 (일일 손실 한도 80% 도달 시 경고)
+- [X] T081 [US5] check_position_concentration 메서드 구현 (종목별 최대 30% 집중도 체크)
+- [X] T082 [US5] should_stop_trading 메서드 구현 (손실 한도 초과 시 즉시 중단)
 
 ### 8.2 테스트 (Simulator 기반)
 
