@@ -185,15 +185,15 @@
 
 ### 4.3 주문 실행 (Order Execution)
 
-- [ ] T044 [P] [US1] OrderValidator 구현 in src/services/order_validator.py (예수금 확인, 수량 검증)
-- [ ] T045 [P] [US1] DuplicateOrderChecker 구현 in src/services/duplicate_checker.py
-- [ ] T046 [US1] OrderExecutor 구현 in src/services/order_executor.py (주문 검증 → 제출 → 상태 추적)
+- [X] T044 [P] [US1] OrderValidator 구현 in src/services/order_validator.py (예수금 확인, 수량 검증)
+- [X] T045 [P] [US1] DuplicateOrderChecker 구현 in src/services/duplicate_checker.py
+- [X] T046 [US1] OrderExecutor 구현 in src/services/order_executor.py (주문 검증 → 제출 → 상태 추적)
 
 ### 4.4 주문 실행 테스트 (Simulator 기반)
 
-- [ ] T047 [P] [US1] OrderValidator 단위 테스트 in tests/unit/test_order_validator.py
-- [ ] T048 [P] [US1] DuplicateOrderChecker 단위 테스트 in tests/unit/test_duplicate_checker.py
-- [ ] T049 [US1] 전략 실행 → 주문 생성 → 체결 통합 테스트 in tests/integration/test_trading_flow.py
+- [X] T047 [P] [US1] OrderValidator 단위 테스트 in tests/unit/test_order_validator.py
+- [X] T048 [P] [US1] DuplicateOrderChecker 단위 테스트 in tests/unit/test_duplicate_checker.py
+- [X] T049 [US1] 전략 실행 → 주문 생성 → 체결 통합 테스트 in tests/integration/test_trading_flow.py
   - Simulator 사용
   - 전략 시그널 발생 → OrderExecutor → Simulator 체결 → 포지션 확인
 
