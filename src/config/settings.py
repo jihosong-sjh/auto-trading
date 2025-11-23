@@ -3,12 +3,30 @@
 환경 변수와 YAML 파일을 통한 설정을 관리합니다.
 """
 
+import yaml
 from pathlib import Path
 from typing import List, Optional
 from decimal import Decimal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class StrategyConfig(BaseModel):
+    """전략 설정 모델.
+
+    Attributes:
+        strategy_name: 전략 고유 이름.
+        strategy_class: 전략 클래스 경로 (예: src.strategies.golden_cross.GoldenCrossStrategy).
+        enabled: 전략 활성화 여부.
+        symbols: 전략이 감시할 종목 코드 목록.
+        params: 전략별 파라미터.
+    """
+    strategy_name: str = Field(..., description="전략 이름")
+    strategy_class: str = Field(..., description="전략 클래스 경로")
+    enabled: bool = Field(default=True, description="전략 활성화 여부")
+    symbols: List[str] = Field(default_factory=list, description="감시 종목 코드")
+    params: dict = Field(default_factory=dict, description="전략 파라미터")
 
 
 class Settings(BaseSettings):
@@ -55,11 +73,18 @@ class Settings(BaseSettings):
     )
 
     # 키움증권 API 설정
-    kiwoom_api_url: str = Field(
-        default="https://openapi.kiwoom.com", description="키움증권 API URL"
+    kiwoom_trading_mode: str = Field(
+        default="virtual", description="투자 구분 (real: 실전투자, virtual: 모의투자)"
+    )
+    kiwoom_api_base_url: Optional[str] = Field(
+        default=None, description="키움증권 API Base URL (미지정 시 trading_mode에 따라 자동 선택)",
+        alias="kiwoom_api_url"  # Backward compatibility
     )
     kiwoom_api_key: Optional[str] = Field(
         default=None, description="키움증권 API 키"
+    )
+    kiwoom_api_secret: Optional[str] = Field(
+        default=None, description="키움증권 API 시크릿"
     )
     kiwoom_account_number: Optional[str] = Field(
         default=None, description="계좌번호 (8자리)"
@@ -99,6 +124,30 @@ class Settings(BaseSettings):
     email_recipients: List[str] = Field(
         default_factory=list, description="수신자 이메일 목록"
     )
+
+    # 전략 및 종목 설정
+    watch_symbols: List[str] = Field(
+        default_factory=lambda: ["005930", "000660", "035420", "051910"],
+        description="감시 대상 종목 코드 목록"
+    )
+    strategies: List[StrategyConfig] = Field(
+        default_factory=list, description="전략 설정 목록"
+    )
+
+    def get_kiwoom_api_url(self) -> str:
+        """투자 구분에 따른 Kiwoom API URL 반환.
+
+        Returns:
+            Kiwoom API URL.
+        """
+        if self.kiwoom_api_base_url:
+            return self.kiwoom_api_base_url
+
+        # trading_mode에 따라 자동 선택
+        if self.kiwoom_trading_mode == "real":
+            return "https://api.kiwoom.com"
+        else:  # virtual (default)
+            return "https://mockapi.kiwoom.com"
 
     def is_production_mode(self) -> bool:
         """프로덕션 모드 여부 확인.
@@ -144,6 +193,62 @@ class Settings(BaseSettings):
         """
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def from_yaml(cls, config_path: str) -> "Settings":
+        """YAML 파일에서 설정을 로드합니다.
+
+        Args:
+            config_path: YAML 설정 파일 경로.
+
+        Returns:
+            Settings 인스턴스.
+
+        Raises:
+            FileNotFoundError: 설정 파일이 없는 경우.
+        """
+        path = Path(config_path)
+
+        # YAML 파일이 없으면 .env에서 기본 설정 로드
+        if not path.exists():
+            settings = cls()
+            # 기본 전략 설정 추가 (골든크로스 전략)
+            if not settings.strategies:
+                settings.strategies = [
+                    StrategyConfig(
+                        strategy_name="golden_cross",
+                        strategy_class="src.strategies.golden_cross.GoldenCrossStrategy",
+                        enabled=True,
+                        symbols=settings.watch_symbols,
+                        params={
+                            "short_period": 5,
+                            "long_period": 20,
+                            "position_size_ratio": 0.2
+                        }
+                    )
+                ]
+            return settings
+
+        # YAML 파일에서 설정 로드
+        with open(path, "r", encoding="utf-8") as f:
+            config_data = yaml.safe_load(f) or {}
+
+        # 전략 설정 파싱
+        strategies = []
+        if "strategies" in config_data:
+            for strategy_data in config_data["strategies"]:
+                strategies.append(StrategyConfig(**strategy_data))
+
+        # .env에서 기본 설정 로드 후 YAML 값으로 오버라이드
+        settings = cls()
+        for key, value in config_data.items():
+            if key != "strategies" and hasattr(settings, key):
+                setattr(settings, key, value)
+
+        if strategies:
+            settings.strategies = strategies
+
+        return settings
 
 
 # 싱글톤 인스턴스

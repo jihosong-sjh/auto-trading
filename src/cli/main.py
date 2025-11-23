@@ -253,7 +253,7 @@ class TradingSystem:
         if self.order_executor and self.order_executor.client:
             try:
                 account = await self.order_executor.client.get_account()
-                positions = await self.order_executor.client.get_positions()
+                positions = self.order_executor.client.get_positions()
             except Exception as e:
                 logger.error(f"Error fetching status: {e}")
 
@@ -702,23 +702,48 @@ async def cmd_test_api(args: argparse.Namespace, config: Settings) -> int:
             from ..simulator.kiwoom_simulator import KiwoomSimulator
             client = KiwoomSimulator(initial_balance=Decimal("10000000"))
             logger.info("[SUCCESS] Simulator initialized successfully")
+
+            # Test basic operations
+            account = await client.get_account()
+            logger.info(f"  - Account balance: {account.cash_balance:,} KRW")
+            logger.info(f"  - Total asset value: {account.total_asset_value:,} KRW")
+
+            positions = client.get_positions()
+            logger.info(f"  - Positions: {len(positions)}")
+
+            logger.info("[SUCCESS] API connectivity test passed")
+            return 0
+
         else:
             from ..api.kiwoom_client import KiwoomClient
-            client = KiwoomClient(
+
+            # Validate required configuration
+            if not config.kiwoom_api_key:
+                raise ValueError("KIWOOM_API_KEY is required for live mode. Set it in .env file.")
+            if not config.kiwoom_api_secret:
+                raise ValueError("KIWOOM_API_SECRET is required for live mode. Set it in .env file.")
+            if not config.kiwoom_account_number:
+                raise ValueError("KIWOOM_ACCOUNT_NUMBER is required for live mode. Set it in .env file.")
+
+            # Use async context manager to properly connect and disconnect
+            async with KiwoomClient(
                 api_key=config.kiwoom_api_key,
-                api_secret=config.kiwoom_api_secret
-            )
-            logger.info("[SUCCESS] API client initialized successfully")
+                api_secret=config.kiwoom_api_secret,
+                account_number=config.kiwoom_account_number,
+                base_url=config.get_kiwoom_api_url()
+            ) as client:
+                logger.info(f"[SUCCESS] API client initialized successfully (mode: {config.kiwoom_trading_mode}, url: {config.get_kiwoom_api_url()})")
 
-        # Test basic operations
-        account = await client.get_account()
-        logger.info(f"  - Account balance: {account.balance:,} KRW")
+                # Test basic operations
+                account = await client.get_account()
+                logger.info(f"  - Account balance: {account.cash_balance:,} KRW")
+                logger.info(f"  - Total asset value: {account.total_asset_value:,} KRW")
 
-        positions = await client.get_positions()
-        logger.info(f"  - Positions: {len(positions)}")
+                positions = await client.get_positions()
+                logger.info(f"  - Positions: {len(positions)}")
 
-        logger.info("[SUCCESS] API connectivity test passed")
-        return 0
+                logger.info("[SUCCESS] API connectivity test passed")
+                return 0
 
     except Exception as e:
         logger.error(f"[FAILED] API connectivity test failed: {e}", exc_info=True)

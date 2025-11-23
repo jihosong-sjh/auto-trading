@@ -25,12 +25,12 @@ class Account(BaseModel):
     account_number: str = Field(
         ..., pattern=r"^\d{8}$", description="8자리 계좌번호"
     )
-    name: str = Field(..., min_length=1, max_length=50, description="계좌명")
+    name: str = Field(default="", max_length=50, description="계좌명")
     cash_balance: Decimal = Field(..., ge=0, description="예수금 (KRW)")
     total_asset_value: Decimal = Field(..., description="총 평가 금액")
     total_pnl: Decimal = Field(default=Decimal("0"), description="총 손익")
     daily_pnl: Decimal = Field(default=Decimal("0"), description="당일 손익")
-    daily_loss_limit: Decimal = Field(..., gt=0, description="일일 손실 한도")
+    daily_loss_limit: Decimal = Field(default=Decimal("0"), ge=0, description="일일 손실 한도")
     updated_at: datetime = Field(default_factory=get_kst_now, description="마지막 업데이트 시간")
 
     @field_validator("total_asset_value")

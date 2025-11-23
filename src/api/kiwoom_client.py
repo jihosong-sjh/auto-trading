@@ -37,8 +37,12 @@ logger = get_logger(__name__)
 class TokenResponse(BaseModel):
     """OAuth2 토큰 응답 모델 (au10001)."""
 
-    token: str = Field(..., description="접근 토큰")
-    expires_in: int = Field(..., description="토큰 만료 시간 (초)")
+    model_config = {"populate_by_name": True}
+
+    token: str = Field(..., description="접근 토큰", alias="access_token")
+    expires_dt: str = Field(..., description="토큰 만료 시간 (YYYYMMDDHHmmss)")
+    return_code: int = Field(default=0, description="응답 코드")
+    return_msg: str = Field(default="", description="응답 메시지")
 
 
 class KiwoomClient:
@@ -119,10 +123,30 @@ class KiwoomClient:
             response.raise_for_status()
 
             token_data = response.json()
+            logger.debug(f"Token response: {token_data}")
+
+            # Kiwoom API returns return_code in all responses
+            # return_code: 0 = success, non-zero = error
+            if "return_code" in token_data:
+                return_code = token_data.get("return_code")
+                return_msg = token_data.get("return_msg", "Unknown")
+
+                if return_code != 0:
+                    logger.error(f"Token refresh failed with return_code {return_code}: {return_msg}")
+                    raise KiwoomAPIError(
+                        f"Token refresh failed (code: {return_code}): {return_msg}",
+                        response_data=token_data
+                    )
+
+                logger.info(f"Token API response: {return_msg}")
+
             token_response = TokenResponse(**token_data)
 
             self.access_token = token_response.token
-            self.token_expires_at = datetime.now(tz=KST) + timedelta(seconds=token_response.expires_in - 60)
+
+            # Parse expires_dt (format: YYYYMMDDHHmmss)
+            expires_dt = datetime.strptime(token_response.expires_dt, "%Y%m%d%H%M%S")
+            self.token_expires_at = expires_dt.replace(tzinfo=KST)
 
             logger.info(f"Token refreshed successfully. Expires at {self.token_expires_at}")
 
@@ -133,6 +157,9 @@ class KiwoomClient:
                 status_code=e.response.status_code,
                 response_data=e.response.json() if "application/json" in e.response.headers.get("content-type", "") else {}
             ) from e
+        except KiwoomAPIError:
+            # Re-raise KiwoomAPIError as-is
+            raise
         except Exception as e:
             logger.error(f"Unexpected error during token refresh: {e}")
             raise KiwoomAPIError(f"Token refresh failed: {str(e)}") from e
