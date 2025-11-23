@@ -16,7 +16,8 @@ from src.simulator.kiwoom_simulator import KiwoomSimulator
 class TestTradingFlowSync:
     """전략 실행부터 주문 체결까지 전체 플로우 테스트 (Sync)."""
 
-    def test_buy_order_execution_flow_sync(self):
+    @pytest.mark.asyncio
+    async def test_buy_order_execution_flow_sync(self):
         """매수 주문 실행 플로우 테스트 (동기식).
 
         1. Simulator 초기화 (초기 자금 1천만원)
@@ -43,7 +44,7 @@ class TestTradingFlowSync:
         )
 
         # When
-        filled_order = simulator.submit_order(buy_order)
+        filled_order = await simulator.submit_order(buy_order)
 
         # Then
         assert filled_order.filled_quantity == 100
@@ -52,7 +53,7 @@ class TestTradingFlowSync:
         assert filled_order.status == OrderStatus.FILLED
 
         # 계좌 확인 (슬리피지 때문에 정확한 금액은 다를 수 있음)
-        account = simulator.get_account()
+        account = await simulator.get_account()
         assert account.cash_balance < Decimal("10000000")  # 초기 자금보다 적어야 함
         assert account.cash_balance > Decimal("2900000")  # 최소한 이 정도는 남아야 함
 
@@ -64,7 +65,8 @@ class TestTradingFlowSync:
         # 슬리피지로 인해 평균 매수가가 설정가보다 약간 높음
         assert positions_list[0].average_buy_price >= Decimal("70000")
 
-    def test_complete_trading_cycle_sync(self):
+    @pytest.mark.asyncio
+    async def test_complete_trading_cycle_sync(self):
         """완전한 거래 사이클 테스트: 매수 → 보유 → 가격 상승 → 매도 → 수익 확인."""
         # Given
         initial_balance = Decimal("10000000")
@@ -80,7 +82,7 @@ class TestTradingFlowSync:
             quantity=100
         )
 
-        buy_filled = simulator.submit_order(buy_order)
+        buy_filled = await simulator.submit_order(buy_order)
         assert buy_filled.status == OrderStatus.FILLED
 
         # 2. 가격 상승 (7만원 → 7.5만원)
@@ -95,11 +97,11 @@ class TestTradingFlowSync:
             quantity=100
         )
 
-        sell_filled = simulator.submit_order(sell_order)
+        sell_filled = await simulator.submit_order(sell_order)
         assert sell_filled.status == OrderStatus.FILLED
 
         # 4. 수익 확인 (슬리피지 고려하여 범위로 검증)
-        account = simulator.get_account()
+        account = await simulator.get_account()
         # 초기 자금보다 증가했는지만 확인
         assert account.cash_balance > initial_balance
 
@@ -107,7 +109,8 @@ class TestTradingFlowSync:
         positions_list = simulator.get_positions()
         assert len(positions_list) == 0  # 전량 매도로 포지션 없음
 
-    def test_limit_order_execution_sync(self):
+    @pytest.mark.asyncio
+    async def test_limit_order_execution_sync(self):
         """지정가 주문 실행 테스트."""
         # Given
         simulator = KiwoomSimulator(initial_balance=Decimal("10000000"))
@@ -124,13 +127,14 @@ class TestTradingFlowSync:
         )
 
         # When
-        filled_order = simulator.submit_order(limit_buy_order)
+        filled_order = await simulator.submit_order(limit_buy_order)
 
         # Then
         assert filled_order.status == OrderStatus.FILLED
         assert filled_order.filled_price == Decimal("70000")
 
-    def test_limit_buy_order_not_filled_when_price_higher(self):
+    @pytest.mark.asyncio
+    async def test_limit_buy_order_not_filled_when_price_higher(self):
         """현재가가 지정가보다 높으면 지정가 매수 주문 미체결."""
         # Given
         simulator = KiwoomSimulator(initial_balance=Decimal("10000000"))
@@ -147,7 +151,7 @@ class TestTradingFlowSync:
         )
 
         # When
-        filled_order = simulator.submit_order(limit_buy_order)
+        filled_order = await simulator.submit_order(limit_buy_order)
 
         # Then
         assert filled_order.status == OrderStatus.SUBMITTED  # 미체결

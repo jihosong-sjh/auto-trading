@@ -63,7 +63,7 @@ class KiwoomSimulator:
         # 오류 주입 플래그
         self._injected_error: Optional[str] = None
 
-    def get_account(self) -> Account:
+    async def get_account(self) -> Account:
         """계좌 정보 조회.
 
         현재 예수금, 총 평가액, 총 손익을 반환합니다.
@@ -105,7 +105,7 @@ class KiwoomSimulator:
 
         return list(self.positions.values())
 
-    def submit_order(self, order: Order) -> Order:
+    async def submit_order(self, order: Order) -> Order:
         """주문 제출 및 체결 시뮬레이션.
 
         매수 주문 시 예수금 확인, 매도 주문 시 보유 수량 확인 후
@@ -216,7 +216,7 @@ class KiwoomSimulator:
             self.order_history[order.order_id] = order
             raise ValueError(order.error_message)
 
-    def get_stock_price(self, stock_code: str) -> Stock:
+    async def get_stock_price(self, stock_code: str) -> Stock:
         """종목의 현재 시세 조회.
 
         FakeExchange에서 현재가를 조회하여 Stock 객체로 반환합니다.

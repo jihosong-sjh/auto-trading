@@ -12,6 +12,7 @@ from ..models import OrderStatus, OrderType
 from ..models.account import Account
 from ..models.order import Order
 from ..models.position import Position
+from ..models.stock import Stock
 from ..utils.logger import get_logger
 from .duplicate_checker import DuplicateOrderChecker
 from .order_validator import OrderValidator
@@ -45,14 +46,14 @@ class KiwoomClientProtocol(Protocol):
         """
         ...
 
-    async def get_stock_price(self, stock_code: str) -> Decimal:
+    async def get_stock_price(self, stock_code: str) -> Stock:
         """현재 주식 가격을 조회합니다.
 
         Args:
             stock_code: 종목 코드
 
         Returns:
-            현재 가격
+            Stock: 종목 정보 (현재가 포함)
         """
         ...
 
@@ -127,7 +128,8 @@ class OrderExecutor:
             account = await self.client.get_account()
 
             # 4. 현재 가격 조회
-            current_price = await self.client.get_stock_price(order.stock_code)
+            stock_info = await self.client.get_stock_price(order.stock_code)
+            current_price = stock_info.current_price
 
             # 5. 주문 유형별 검증
             if order.order_type == OrderType.BUY:

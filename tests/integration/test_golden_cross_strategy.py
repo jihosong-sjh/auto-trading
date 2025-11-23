@@ -148,7 +148,7 @@ async def test_golden_cross_buy_signal(simulator, golden_cross_strategy):
     assert buy_signal_after is True, "골든크로스 발생 시 매수 신호가 있어야 함"
 
     # 5. Simulator에 매수 주문 제출
-    account = simulator.get_account()
+    account = await simulator.get_account()
     quantity = 100
 
     buy_order = Order(
@@ -159,7 +159,7 @@ async def test_golden_cross_buy_signal(simulator, golden_cross_strategy):
         quantity=quantity,
     )
 
-    filled_order = simulator.submit_order(buy_order)
+    filled_order = await simulator.submit_order(buy_order)
 
     # 6. 주문 체결 확인
     assert filled_order.status == OrderStatus.FILLED, "주문이 체결되어야 함"
@@ -198,7 +198,7 @@ async def test_golden_cross_sell_signal_dead_cross(simulator, golden_cross_strat
     simulator.exchange.set_price(stock_code, initial_price)
 
     # 매수 주문 제출 (포지션 생성)
-    account = simulator.get_account()
+    account = await simulator.get_account()
     quantity = 100
 
     buy_order = Order(
@@ -208,7 +208,7 @@ async def test_golden_cross_sell_signal_dead_cross(simulator, golden_cross_strat
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    simulator.submit_order(buy_order)
+    await simulator.submit_order(buy_order)
 
     # 포지션 확인
     positions = simulator.get_positions()
@@ -262,7 +262,7 @@ async def test_golden_cross_sell_signal_dead_cross(simulator, golden_cross_strat
         quantity=quantity,
     )
 
-    filled_order = simulator.submit_order(sell_order)
+    filled_order = await simulator.submit_order(sell_order)
 
     # 6. 주문 체결 확인
     assert filled_order.status == OrderStatus.FILLED, "매도 주문이 체결되어야 함"
@@ -289,7 +289,7 @@ async def test_golden_cross_sell_signal_stop_loss(simulator, golden_cross_strate
     # Simulator에 종목 등록 및 포지션 생성
     simulator.exchange.set_price(stock_code, buy_price)
 
-    account = simulator.get_account()
+    account = await simulator.get_account()
     quantity = 100
 
     # 매수 주문 제출
@@ -300,7 +300,7 @@ async def test_golden_cross_sell_signal_stop_loss(simulator, golden_cross_strate
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    simulator.submit_order(buy_order)
+    await simulator.submit_order(buy_order)
 
     # 가격 하락 (손절 조건 충족)
     simulator.exchange.set_price(stock_code, stop_loss_price - Decimal("100"))
@@ -330,7 +330,7 @@ async def test_golden_cross_sell_signal_stop_loss(simulator, golden_cross_strate
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    filled_order = simulator.submit_order(sell_order)
+    filled_order = await simulator.submit_order(sell_order)
 
     assert filled_order.status == OrderStatus.FILLED, "손절 매도가 체결되어야 함"
     assert len(simulator.get_positions()) == 0, "포지션이 제거되어야 함"
@@ -352,7 +352,7 @@ async def test_golden_cross_sell_signal_take_profit(simulator, golden_cross_stra
     # Simulator에 종목 등록 및 포지션 생성
     simulator.exchange.set_price(stock_code, buy_price)
 
-    account = simulator.get_account()
+    account = await simulator.get_account()
     quantity = 100
 
     # 매수 주문 제출
@@ -363,7 +363,7 @@ async def test_golden_cross_sell_signal_take_profit(simulator, golden_cross_stra
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    simulator.submit_order(buy_order)
+    await simulator.submit_order(buy_order)
 
     # 가격 상승 (익절 조건 충족)
     simulator.exchange.set_price(stock_code, take_profit_price + Decimal("100"))
@@ -393,13 +393,13 @@ async def test_golden_cross_sell_signal_take_profit(simulator, golden_cross_stra
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    filled_order = simulator.submit_order(sell_order)
+    filled_order = await simulator.submit_order(sell_order)
 
     assert filled_order.status == OrderStatus.FILLED, "익절 매도가 체결되어야 함"
     assert len(simulator.get_positions()) == 0, "포지션이 제거되어야 함"
 
     # 수익 확인
-    account_after = simulator.get_account()
+    account_after = await simulator.get_account()
     assert account_after.cash_balance > Decimal("10000000"), "익절로 수익이 발생해야 함"
 
 
@@ -414,7 +414,7 @@ async def test_golden_cross_full_scenario(simulator, golden_cross_strategy):
     4. 손익 확인
     """
     stock_code = "005930"
-    initial_balance = simulator.get_account().cash_balance
+    initial_balance = (await simulator.get_account()).cash_balance
 
     # 1. 하락 추세 → 상승 추세 (골든크로스)
     downtrend_data = create_chart_data_sequence(
@@ -447,7 +447,7 @@ async def test_golden_cross_full_scenario(simulator, golden_cross_strategy):
     buy_signal = await golden_cross_strategy.evaluate_buy_signal(stock)
     assert buy_signal is True, "골든크로스 시 매수 신호 발생"
 
-    account = simulator.get_account()
+    account = await simulator.get_account()
     quantity = await golden_cross_strategy.calculate_position_size(
         stock, account.cash_balance
     )
@@ -459,7 +459,7 @@ async def test_golden_cross_full_scenario(simulator, golden_cross_strategy):
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    filled_buy_order = simulator.submit_order(buy_order)
+    filled_buy_order = await simulator.submit_order(buy_order)
     assert filled_buy_order.status == OrderStatus.FILLED, "매수 주문 체결"
 
     # 3. 가격 상승 (계속 상승)
@@ -502,11 +502,11 @@ async def test_golden_cross_full_scenario(simulator, golden_cross_strategy):
         price_type=PriceType.MARKET,
         quantity=quantity,
     )
-    filled_sell_order = simulator.submit_order(sell_order)
+    filled_sell_order = await simulator.submit_order(sell_order)
     assert filled_sell_order.status == OrderStatus.FILLED, "매도 주문 체결"
 
     # 6. 손익 확인
-    final_balance = simulator.get_account().cash_balance
+    final_balance = (await simulator.get_account()).cash_balance
     pnl = final_balance - initial_balance
 
     # 상승 후 하락이지만, 전체적으로는 매수가보다 높은 가격에 매도했는지 확인

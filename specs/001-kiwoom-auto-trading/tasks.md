@@ -209,29 +209,29 @@
 
 ### 5.1 실제 Kiwoom API 클라이언트 구현
 
-- [ ] T050 키움증권 API 인증 클라이언트 구현 in src/api/kiwoom_client.py (OAuth2 토큰 발급, 갱신 로직)
-- [ ] T051 Rate Limiter 구현 in src/api/rate_limiter.py (초당 15 req 제한)
-- [ ] T052 [P] 실시간 시세 조회 API 구현 in src/api/kiwoom_client.py (GET /market/price)
-- [ ] T053 [P] 일봉 데이터 조회 API 구현 in src/api/kiwoom_client.py (GET /market/chart/daily)
-- [ ] T054 [P] 매수 주문 API 구현 in src/api/kiwoom_client.py (POST /order/buy)
-- [ ] T055 [P] 매도 주문 API 구현 in src/api/kiwoom_client.py (POST /order/sell)
-- [ ] T056 [P] 주문 상태 조회 API 구현 in src/api/kiwoom_client.py (GET /order/status)
-- [ ] T057 [P] 계좌 잔고 조회 API 구현 in src/api/kiwoom_client.py (GET /account/balance)
-- [ ] T058 [P] 보유 종목 조회 API 구현 in src/api/kiwoom_client.py (GET /account/positions)
-- [ ] T059 키움증권 API 에러 처리 및 재시도 로직 구현 in src/api/kiwoom_client.py (최대 3회 재시도)
+- [X] T050 키움증권 API 인증 클라이언트 구현 in src/api/kiwoom_client.py (OAuth2 토큰 발급, 갱신 로직)
+- [X] T051 Rate Limiter 구현 in src/api/rate_limiter.py (초당 15 req 제한)
+- [X] T052 [P] 실시간 시세 조회 API 구현 in src/api/kiwoom_client.py (GET /market/price)
+- [X] T053 [P] 일봉 데이터 조회 API 구현 in src/api/kiwoom_client.py (GET /market/chart/daily)
+- [X] T054 [P] 매수 주문 API 구현 in src/api/kiwoom_client.py (POST /order/buy)
+- [X] T055 [P] 매도 주문 API 구현 in src/api/kiwoom_client.py (POST /order/sell)
+- [X] T056 [P] 주문 상태 조회 API 구현 in src/api/kiwoom_client.py (GET /order/status)
+- [X] T057 [P] 계좌 잔고 조회 API 구현 in src/api/kiwoom_client.py (GET /account/balance)
+- [X] T058 [P] 보유 종목 조회 API 구현 in src/api/kiwoom_client.py (GET /account/positions)
+- [X] T059 키움증권 API 에러 처리 및 재시도 로직 구현 in src/api/kiwoom_client.py (최대 3회 재시도)
 
 ### 5.2 Contract Test (실제 API vs Simulator 응답 일치 검증) 🎯 핵심
 
 **목적**: 실제 Kiwoom API와 Simulator가 동일한 Pydantic 모델로 파싱되는지 검증합니다.
 
-- [ ] T060 [P] Account 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
+- [X] T060 [P] Account 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
   - 실제 API 응답 → Account 모델 파싱 성공
   - Simulator 응답 → Account 모델 파싱 성공
   - 두 응답의 스키마 일치 검증
-- [ ] T061 [P] Order 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
-- [ ] T062 [P] Position 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
-- [ ] T063 [P] Stock 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
-- [ ] T064 에러 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
+- [X] T061 [P] Order 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
+- [X] T062 [P] Position 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
+- [X] T063 [P] Stock 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
+- [X] T064 에러 응답 형식 계약 테스트 in tests/contract/test_kiwoom_contract.py
   - 예수금 부족 에러
   - 잘못된 종목 코드 에러
   - API 타임아웃 에러
