@@ -35,12 +35,10 @@ logger = get_logger(__name__)
 
 
 class TokenResponse(BaseModel):
-    """OAuth2 토큰 응답 모델."""
+    """OAuth2 토큰 응답 모델 (au10001)."""
 
-    access_token: str = Field(..., description="액세스 토큰")
-    token_type: str = Field(..., description="토큰 타입 (Bearer)")
+    token: str = Field(..., description="접근 토큰")
     expires_in: int = Field(..., description="토큰 만료 시간 (초)")
-    refresh_token: str | None = Field(None, description="리프레시 토큰")
 
 
 class KiwoomClient:
@@ -99,7 +97,12 @@ class KiwoomClient:
             logger.info("Kiwoom API client closed")
 
     async def _refresh_token(self) -> None:
-        """OAuth2 토큰 발급 또는 갱신."""
+        """OAuth2 토큰 발급 또는 갱신 (au10001).
+
+        URL: POST /oauth2/token
+        Request: grant_type, appkey, secretkey
+        Response: token, expires_in
+        """
         if not self.client:
             raise KiwoomAPIError("Client not connected. Call connect() first.")
 
@@ -107,8 +110,8 @@ class KiwoomClient:
 
         payload = {
             "grant_type": "client_credentials",
-            "client_id": self.api_key,
-            "client_secret": self.api_secret
+            "appkey": self.api_key,
+            "secretkey": self.api_secret
         }
 
         try:
@@ -118,7 +121,7 @@ class KiwoomClient:
             token_data = response.json()
             token_response = TokenResponse(**token_data)
 
-            self.access_token = token_response.access_token
+            self.access_token = token_response.token
             self.token_expires_at = datetime.now(tz=KST) + timedelta(seconds=token_response.expires_in - 60)
 
             logger.info(f"Token refreshed successfully. Expires at {self.token_expires_at}")
@@ -188,21 +191,46 @@ class KiwoomClient:
                         logger.warning(f"Failed to parse error response as JSON: {e}")
 
                 error_message = error_data.get("message", response.text)
+                error_code = str(error_data.get("error_code", ""))
 
-                if response.status_code == 429:
-                    raise RateLimitExceededError(
-                        "Rate limit exceeded",
+                # Handle Kiwoom-specific error codes (T059)
+                # 1513, 8103: Token authentication failure - trigger re-auth
+                if error_code in ["1513", "8103"]:
+                    logger.warning(f"Token authentication failed (code: {error_code}). Re-authenticating...")
+                    self.access_token = None
+                    self.token_expires_at = None
+                    # Don't retry here - let it fail and retry on next request
+                    raise KiwoomAPIError(
+                        f"Token authentication failed: {error_message}",
                         status_code=response.status_code,
                         response_data=error_data
                     )
+
+                # 1501: API ID Null or Invalid
+                if error_code == "1501":
+                    raise KiwoomAPIError(
+                        f"Invalid API credentials: {error_message}",
+                        status_code=response.status_code,
+                        response_data=error_data
+                    )
+
+                # 1687: Recursion limit (Rate Limit)
+                if error_code == "1687" or response.status_code == 429:
+                    raise RateLimitExceededError(
+                        f"Rate limit exceeded: {error_message}",
+                        status_code=response.status_code,
+                        response_data=error_data
+                    )
+
+                # HTTP 400 errors
                 if response.status_code == 400:
-                    if "insufficient balance" in error_message.lower():
+                    if "insufficient balance" in error_message.lower() or "예수금 부족" in error_message:
                         raise InsufficientBalanceError(
                             error_message,
                             status_code=response.status_code,
                             response_data=error_data
                         )
-                    if "invalid stock code" in error_message.lower():
+                    if "invalid stock code" in error_message.lower() or "종목코드" in error_message:
                         raise InvalidStockCodeError(
                             error_message,
                             status_code=response.status_code,
@@ -210,7 +238,7 @@ class KiwoomClient:
                         )
 
                 raise KiwoomAPIError(
-                    f"API error: {error_message}",
+                    f"API error (code: {error_code}): {error_message}",
                     status_code=response.status_code,
                     response_data=error_data
                 )
@@ -247,19 +275,30 @@ class KiwoomClient:
         )
 
     async def get_stock_price(self, stock_code: str) -> Stock:
-        """실시간 시세 조회."""
+        """실시간 시세 조회 (ka10006).
+
+        URL: POST /api/dostk/mrkcond
+        Request: tr_cd, stk_cd
+        Response: cur_prc, open_pric, high_pric, low_pric, trde_qty
+        """
         logger.info(f"Fetching stock price for {stock_code}")
-        data = await self._request("GET", f"/market/price/{stock_code}")
+
+        payload = {
+            "tr_cd": "ka10006",  # 주식시세요청
+            "stk_cd": stock_code
+        }
+
+        data = await self._request("POST", "/api/dostk/mrkcond", json=payload)
 
         return Stock(
-            stock_code=data["stock_code"],
-            stock_name=data["stock_name"],
-            market=data["market"],
-            current_price=Decimal(str(data["current_price"])),
-            open_price=Decimal(str(data.get("open_price", 0))) if data.get("open_price") else None,
-            high_price=Decimal(str(data.get("high_price", 0))) if data.get("high_price") else None,
-            low_price=Decimal(str(data.get("low_price", 0))) if data.get("low_price") else None,
-            volume=data.get("volume", 0),
+            stock_code=stock_code,
+            stock_name=data.get("stk_nm", ""),
+            market=data.get("mrkt_tp", ""),
+            current_price=Decimal(str(data["cur_prc"])),
+            open_price=Decimal(str(data["open_pric"])) if data.get("open_pric") else None,
+            high_price=Decimal(str(data["high_pric"])) if data.get("high_pric") else None,
+            low_price=Decimal(str(data["low_pric"])) if data.get("low_pric") else None,
+            volume=int(data.get("trde_qty", 0)),
             updated_at=datetime.now(tz=KST)
         )
 
@@ -271,125 +310,274 @@ class KiwoomClient:
         end_date: datetime | None = None,
         limit: int = 100
     ) -> list[ChartData]:
-        """일봉/분봉 차트 데이터 조회."""
+        """일봉 차트 데이터 조회 (ka10081).
+
+        URL: POST /api/dostk/chart
+        Request: tr_cd, stk_cd, base_dt
+        Response: stk_dt_pole_chart_qry (dt, open_pric, high_pric, low_pric, cur_prc, trde_qty)
+        """
         logger.info(f"Fetching chart data for {stock_code}, interval={interval.value}")
 
         if not end_date:
             end_date = datetime.now(tz=KST)
-        if not start_date:
-            start_date = end_date - timedelta(days=100)
 
-        params = {
-            "interval": interval.value,
-            "start_date": start_date.strftime("%Y%m%d"),
-            "end_date": end_date.strftime("%Y%m%d"),
-            "limit": limit
+        payload = {
+            "tr_cd": "ka10081",  # 주식일봉차트조회요청
+            "stk_cd": stock_code,
+            "base_dt": end_date.strftime("%Y%m%d")
         }
 
-        data = await self._request("GET", f"/market/chart/{stock_code}", params=params)
+        data = await self._request("POST", "/api/dostk/chart", json=payload)
 
         chart_list = []
-        for item in data.get("chart_data", []):
+        for item in data.get("stk_dt_pole_chart_qry", []):
+            # Parse date from YYYYMMDD format
+            dt_str = str(item["dt"])
+            timestamp = datetime.strptime(dt_str, "%Y%m%d").replace(tzinfo=KST)
+
             chart = ChartData(
                 stock_code=stock_code,
                 interval=interval,
-                timestamp=datetime.fromisoformat(item["timestamp"]),
-                open_price=Decimal(str(item["open_price"])),
-                high_price=Decimal(str(item["high_price"])),
-                low_price=Decimal(str(item["low_price"])),
-                close_price=Decimal(str(item["close_price"])),
-                volume=item["volume"]
+                timestamp=timestamp,
+                open_price=Decimal(str(item["open_pric"])),
+                high_price=Decimal(str(item["high_pric"])),
+                low_price=Decimal(str(item["low_pric"])),
+                close_price=Decimal(str(item["cur_prc"])),
+                volume=int(item["trde_qty"])
             )
             chart_list.append(chart)
 
         return chart_list
 
     async def submit_order(self, order: Order) -> Order:
-        """주문 제출 (매수/매도)."""
+        """주문 제출 (매수/매도) (kt10000, kt10001).
+
+        URL: POST /api/dostk/ordr
+        Request: tr_cd, acnt_no, stk_cd, ord_qty, ord_uv, trde_tp
+        Response: ord_no, return_code
+
+        trde_tp (매매구분):
+        - 0: 보통/지정가
+        - 3: 시장가
+        """
         logger.info(f"Submitting order: {order.order_type.value} {order.quantity} shares of {order.stock_code}")
 
-        endpoint = "/order/buy" if order.order_type == OrderType.BUY else "/order/sell"
+        # Determine tr_cd and trde_tp
+        tr_cd = "kt10000" if order.order_type == OrderType.BUY else "kt10001"  # 매수/매도 구분
+
+        if order.price_type == PriceType.MARKET:
+            trde_tp = "3"  # 시장가
+            ord_uv = 0  # 시장가는 0
+        else:
+            trde_tp = "0"  # 지정가
+            ord_uv = int(order.limit_price) if order.limit_price else 0
 
         payload = {
-            "account_number": self.account_number,
-            "stock_code": order.stock_code,
-            "quantity": order.quantity,
-            "price_type": order.price_type.value,
+            "tr_cd": tr_cd,
+            "acnt_no": self.account_number,
+            "stk_cd": order.stock_code,
+            "ord_qty": order.quantity,
+            "ord_uv": ord_uv,
+            "trde_tp": trde_tp
         }
 
-        if order.price_type == PriceType.LIMIT and order.limit_price:
-            payload["limit_price"] = str(order.limit_price)
+        data = await self._request("POST", "/api/dostk/ordr", json=payload)
 
-        data = await self._request("POST", endpoint, json=payload)
+        # Check return code
+        return_code = data.get("return_code", "0")
+        if return_code != "0":
+            raise KiwoomAPIError(
+                f"Order failed with return_code: {return_code}",
+                response_data=data
+            )
 
-        order.status = OrderStatus[data["status"]]
+        # Update order with response
+        order_no = data.get("ord_no")
+        if order_no:
+            order.order_id = order_no
+
+        order.status = OrderStatus.PENDING  # 주문 접수됨
         order.submitted_at = datetime.now(tz=KST)
 
-        if data.get("filled_quantity"):
-            order.filled_quantity = data["filled_quantity"]
-        if data.get("filled_price"):
-            order.filled_price = Decimal(str(data["filled_price"]))
-        if data.get("filled_at"):
-            order.filled_at = datetime.fromisoformat(data["filled_at"])
-
-        logger.info(f"Order submitted successfully: order_id={order.order_id}, status={order.status.value}")
+        logger.info(f"Order submitted successfully: order_id={order.order_id}, ord_no={order_no}")
 
         return order
 
-    async def get_order_status(self, order_id: str) -> Order:
-        """주문 상태 조회."""
+    async def get_order_status(self, order_id: str, stock_code: str | None = None) -> Order | None:
+        """주문 상태 조회 (ka10075 미체결).
+
+        URL: POST /api/dostk/acnt
+        Request: tr_cd, acnt_no, stk_cd (optional)
+        Response: oso (ord_no, ord_qty, cntr_qty, oso_qty)
+
+        Note:
+            - 미체결 목록에서 해당 주문번호를 찾아 반환합니다.
+            - API 응답에 order_type, price_type 정보가 없어 기본값 사용
+            - 정확한 정보가 필요하면 submit_order() 응답을 저장하여 사용하세요.
+
+        Args:
+            order_id: 주문번호 (ord_no)
+            stock_code: 종목코드 (선택, 특정 종목으로 필터링)
+
+        Returns:
+            Order 객체 또는 None (미체결 목록에 없으면 None)
+        """
         logger.info(f"Fetching order status for {order_id}")
 
-        data = await self._request("GET", f"/order/status/{order_id}")
+        payload = {
+            "tr_cd": "ka10075",  # 미체결요청
+            "acnt_no": self.account_number,
+        }
+        if stock_code:
+            payload["stk_cd"] = stock_code
 
-        return Order(
-            order_id=data["order_id"],
-            account_number=data["account_number"],
-            stock_code=data["stock_code"],
-            order_type=OrderType[data["order_type"]],
-            price_type=PriceType[data["price_type"]],
-            quantity=data["quantity"],
-            limit_price=Decimal(str(data["limit_price"])) if data.get("limit_price") else None,
-            status=OrderStatus[data["status"]],
-            filled_quantity=data.get("filled_quantity", 0),
-            filled_price=Decimal(str(data["filled_price"])) if data.get("filled_price") else None,
-            created_at=datetime.fromisoformat(data["created_at"]),
-            submitted_at=datetime.fromisoformat(data["submitted_at"]) if data.get("submitted_at") else None,
-            filled_at=datetime.fromisoformat(data["filled_at"]) if data.get("filled_at") else None
-        )
+        data = await self._request("POST", "/api/dostk/acnt", json=payload)
+
+        # Search for order in unfilled orders list (oso)
+        oso_list = data.get("oso", [])
+        for oso_item in oso_list:
+            if oso_item.get("ord_no") == order_id:
+                ord_qty = int(oso_item.get("ord_qty", 0))
+                cntr_qty = int(oso_item.get("cntr_qty", 0))
+                # oso_qty = int(oso_item.get("oso_qty", 0))  # 미체결수량 (현재 미사용)
+
+                # Determine status
+                if cntr_qty == 0:
+                    status = OrderStatus.PENDING
+                elif cntr_qty < ord_qty:
+                    status = OrderStatus.PARTIALLY_FILLED
+                else:
+                    status = OrderStatus.FILLED
+
+                return Order(
+                    order_id=order_id,
+                    account_number=self.account_number,
+                    stock_code=oso_item.get("stk_cd", stock_code or ""),
+                    order_type=OrderType.BUY,  # TODO: Need to store this separately
+                    price_type=PriceType.LIMIT,  # TODO: Need to store this separately
+                    quantity=ord_qty,
+                    limit_price=None,
+                    status=status,
+                    filled_quantity=cntr_qty,
+                    filled_price=None,
+                    created_at=datetime.now(tz=KST),
+                    submitted_at=datetime.now(tz=KST),
+                    filled_at=datetime.now(tz=KST) if cntr_qty > 0 else None
+                )
+
+        # Order not found in unfilled list - may be fully filled or cancelled
+        logger.warning(f"Order {order_id} not found in unfilled orders list")
+        return None
+
+    async def get_filled_orders(self) -> list[Order]:
+        """체결 내역 조회 (ka10076).
+
+        URL: POST /api/dostk/acnt
+        Request: tr_cd, acnt_no
+        Response: cntr (체결 리스트)
+
+        Note:
+            - 당일 체결된 내역을 조회합니다.
+            - 완전 체결된 주문 정보 확인에 활용
+
+        Returns:
+            체결된 주문 리스트
+        """
+        logger.info(f"Fetching filled orders for {self.account_number}")
+
+        payload = {
+            "tr_cd": "ka10076",  # 체결요청
+            "acnt_no": self.account_number
+        }
+
+        data = await self._request("POST", "/api/dostk/acnt", json=payload)
+
+        filled_orders = []
+        for cntr_item in data.get("cntr", []):
+            order = Order(
+                order_id=cntr_item.get("ord_no", ""),
+                account_number=self.account_number,
+                stock_code=cntr_item.get("stk_cd", ""),
+                order_type=OrderType.BUY,  # API에서 제공하지 않음
+                price_type=PriceType.LIMIT,  # API에서 제공하지 않음
+                quantity=int(cntr_item.get("ord_qty", 0)),
+                limit_price=None,
+                status=OrderStatus.FILLED,
+                filled_quantity=int(cntr_item.get("cntr_qty", 0)),
+                filled_price=Decimal(str(cntr_item.get("cntr_prc", 0))) if cntr_item.get("cntr_prc") else None,
+                created_at=datetime.now(tz=KST),
+                submitted_at=datetime.now(tz=KST),
+                filled_at=datetime.now(tz=KST)
+            )
+            filled_orders.append(order)
+
+        return filled_orders
 
     async def get_account(self) -> Account:
-        """계좌 잔고 조회."""
+        """계좌 잔고 조회 (kt00001 예수금상세현황요청).
+
+        URL: POST /api/dostk/acnt
+        Request: tr_cd, acnt_no
+        Response: entr (예수금), ord_alowa (주문가능현금), wthd_alowa (인출가능금액)
+        """
         logger.info(f"Fetching account balance for {self.account_number}")
 
-        data = await self._request("GET", f"/account/balance/{self.account_number}")
+        payload = {
+            "tr_cd": "kt00001",  # 예수금상세현황요청
+            "acnt_no": self.account_number
+        }
+
+        data = await self._request("POST", "/api/dostk/acnt", json=payload)
+
+        # Extract balance information
+        entr = Decimal(str(data.get("entr", 0)))  # 예수금
+        ord_alowa = Decimal(str(data.get("ord_alowa", 0)))  # 주문가능현금
+        # wthd_alowa = Decimal(str(data.get("wthd_alowa", 0)))  # 인출가능금액 (현재 미사용)
 
         return Account(
-            account_number=data["account_number"],
-            name=data["name"],
-            cash_balance=Decimal(str(data["cash_balance"])),
-            total_asset_value=Decimal(str(data["total_asset_value"])),
-            total_pnl=Decimal(str(data.get("total_pnl", 0))),
-            daily_pnl=Decimal(str(data.get("daily_pnl", 0))),
-            daily_loss_limit=Decimal(str(data.get("daily_loss_limit", 0))),
+            account_number=self.account_number,
+            name=data.get("acnt_nm", ""),
+            cash_balance=ord_alowa,  # Use ord_alowa as available cash
+            total_asset_value=entr,  # Use entr as total asset
+            total_pnl=Decimal("0"),  # Not provided by this API
+            daily_pnl=Decimal("0"),  # Not provided by this API
+            daily_loss_limit=Decimal("0"),  # Not provided by this API
             updated_at=datetime.now(tz=KST)
         )
 
     async def get_positions(self) -> list[Position]:
-        """보유 종목 조회."""
+        """보유 종목 조회 (kt00018 계좌평가잔고내역요청).
+
+        URL: POST /api/dostk/acnt
+        Request: tr_cd, acnt_no, qry_tp (조회구분: 1-합산, 2-개별)
+        Response: acnt_evlt_remn_indv_tot (stk_cd, stk_nm, rmnd_qty, evlt_amt, evltv_prft, pft_rt)
+        """
         logger.info(f"Fetching positions for {self.account_number}")
 
-        data = await self._request("GET", f"/account/positions/{self.account_number}")
+        payload = {
+            "tr_cd": "kt00018",  # 계좌평가잔고내역요청
+            "acnt_no": self.account_number,
+            "qry_tp": "2"  # 개별 조회
+        }
+
+        data = await self._request("POST", "/api/dostk/acnt", json=payload)
 
         positions = []
-        for item in data.get("positions", []):
+        for item in data.get("acnt_evlt_remn_indv_tot", []):
+            stk_cd = item.get("stk_cd", "")
+            rmnd_qty = int(item.get("rmnd_qty", 0))  # 보유수량
+            evlt_amt = Decimal(str(item.get("evlt_amt", 0)))  # 평가금액
+
+            # Calculate average buy price from evaluation amount and quantity
+            avg_buy_price = evlt_amt / Decimal(rmnd_qty) if rmnd_qty > 0 else Decimal("0")
+
             position = Position(
                 account_number=self.account_number,
-                stock_code=item["stock_code"],
-                quantity=item["quantity"],
-                average_buy_price=Decimal(str(item["average_buy_price"])),
-                current_price=Decimal(str(item["current_price"])),
-                opened_at=datetime.fromisoformat(item["opened_at"]),
+                stock_code=stk_cd,
+                quantity=rmnd_qty,
+                average_buy_price=avg_buy_price,
+                current_price=avg_buy_price,  # Use same as avg for now
+                opened_at=datetime.now(tz=KST),
                 updated_at=datetime.now(tz=KST)
             )
             positions.append(position)
