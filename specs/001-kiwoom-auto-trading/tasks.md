@@ -270,19 +270,19 @@
 
 ### 7.1 데이터 수집기 (DataCollector)
 
-- [ ] T072 [US4] DataCollector 인터페이스 구현 in src/services/data_collector.py
-- [ ] T073 [US4] StaggeredPricePoller 구현 (1초 간격, 종목별 분산 폴링)
-- [ ] T074 [US4] 차트 데이터 캐싱 로직 구현 (5초 TTL, 최대 1000개 캐시)
-- [ ] T075 [US4] 데이터 수신 타임아웃 감지 및 재연결 로직 (3분 이상 데이터 없을 시 경고)
+- [X] T072 [US4] DataCollector 인터페이스 구현 in src/services/data_collector.py
+- [X] T073 [US4] StaggeredPricePoller 구현 (1초 간격, 종목별 분산 폴링)
+- [X] T074 [US4] 차트 데이터 캐싱 로직 구현 (5초 TTL, 최대 1000개 캐시)
+- [X] T075 [US4] 데이터 수신 타임아웃 감지 및 재연결 로직 (3분 이상 데이터 없을 시 경고)
 
 ### 7.2 테스트 (Simulator 기반)
 
-- [ ] T076 [P] [US4] DataCollector 단위 테스트 in tests/unit/test_data_collector.py
-- [ ] T077 [US4] 데이터 수집 → 전략 평가 통합 테스트 in tests/integration/test_data_flow.py
+- [X] T076 [P] [US4] DataCollector 단위 테스트 in tests/unit/test_data_collector.py
+- [X] T077 [US4] 데이터 수집 → 전략 평가 통합 테스트 in tests/integration/test_data_flow.py
 
 ### 7.3 통합
 
-- [ ] T078 [US4] DataCollector를 StrategyEngine에 통합 (asyncio.Queue를 통한 데이터 전달)
+- [X] T078 [US4] DataCollector를 StrategyEngine에 통합 (asyncio.Queue를 통한 데이터 전달)
 
 **Checkpoint**: User Story 4 완료 - 실시간 데이터가 정상적으로 수집되고 전략 엔진으로 전달되어야 함
 

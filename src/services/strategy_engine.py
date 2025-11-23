@@ -1,17 +1,22 @@
 """전략 엔진 모듈.
 
 이 모듈은 전략을 동적으로 로드하고 관리하는 기능을 제공합니다.
+
+T078: DataCollector와 asyncio.Queue를 통해 통합되어,
+      실시간 시세 데이터를 수신하여 전략 평가를 수행합니다.
 """
 
+import asyncio
 import importlib
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 from decimal import Decimal
 
 import yaml
 from pydantic import BaseModel, Field
 
+from ..models import Stock
 from ..models.strategy import BaseStrategy
 
 
@@ -50,15 +55,25 @@ class StrategyEngine:
         strategy_configs: 전략 설정 딕셔너리 (strategy_name -> StrategyConfig)
     """
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(
+        self,
+        config_path: Optional[Path] = None,
+        market_data_queue: Optional[asyncio.Queue] = None
+    ):
         """전략 엔진 초기화.
 
         Args:
             config_path: 전략 설정 YAML 파일 경로. None이면 기본 경로 사용.
+            market_data_queue: 시장 데이터를 수신할 asyncio.Queue (T078).
         """
         self.config_path = config_path or Path("config/strategies.yaml")
         self.strategies: Dict[str, BaseStrategy] = {}
         self.strategy_configs: Dict[str, StrategyConfig] = {}
+
+        # T078: DataCollector와의 통합을 위한 큐
+        self.market_data_queue = market_data_queue
+        self.running = False
+        self.consumer_task: Optional[asyncio.Task] = None
 
     def load_strategies_from_yaml(self) -> List[StrategyConfig]:
         """YAML 파일에서 전략 설정 로드.
@@ -291,3 +306,110 @@ class StrategyEngine:
 
         # 전략 재로드
         return self.load_and_initialize_strategies()
+
+    # T078: DataCollector 통합 메서드
+    async def consume_market_data(self) -> None:
+        """시장 데이터 큐에서 데이터를 소비하고 전략 평가 (T078).
+
+        market_data_queue에서 Stock 데이터를 수신하여
+        각 전략의 매수/매도 시그널을 평가합니다.
+
+        Raises:
+            RuntimeError: market_data_queue가 설정되지 않은 경우
+        """
+        if self.market_data_queue is None:
+            raise RuntimeError("market_data_queue is not configured")
+
+        if not self.strategies:
+            logger.warning("No strategies loaded. Call load_and_initialize_strategies() first.")
+            return
+
+        self.running = True
+        logger.info(
+            f"Starting market data consumer with {len(self.strategies)} strategies"
+        )
+
+        try:
+            while self.running:
+                try:
+                    # 큐에서 시장 데이터 수신 (1초 타임아웃)
+                    stock = await asyncio.wait_for(
+                        self.market_data_queue.get(),
+                        timeout=1.0
+                    )
+
+                    # 모든 활성 전략에 대해 평가
+                    await self._evaluate_strategies(stock)
+
+                except asyncio.TimeoutError:
+                    # 큐에 데이터 없음 (정상)
+                    continue
+
+                except Exception as e:
+                    logger.error(f"Error consuming market data: {e}")
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            logger.info("Market data consumer cancelled")
+            raise
+
+        finally:
+            self.running = False
+            logger.info("Market data consumer stopped")
+
+    async def _evaluate_strategies(self, stock: Stock) -> None:
+        """모든 전략에 대해 시그널 평가 (내부 메서드).
+
+        Args:
+            stock: 평가할 종목 데이터.
+        """
+        for strategy_name, strategy in self.strategies.items():
+            try:
+                # 매수 시그널 평가
+                buy_signal = await strategy.evaluate_buy_signal(stock)
+
+                if buy_signal:
+                    logger.info(
+                        f"[{strategy_name}] BUY signal for {stock.stock_code} "
+                        f"at {stock.current_price}"
+                    )
+                    # TODO: 실제 주문 실행 로직 (OrderExecutor 호출)
+
+                # 매도 시그널 평가
+                # TODO: 현재 포지션이 있는지 확인 필요
+                # sell_signal = await strategy.evaluate_sell_signal(stock)
+
+            except Exception as e:
+                logger.error(
+                    f"Error evaluating strategy {strategy_name} for {stock.stock_code}: {e}"
+                )
+
+    async def run(self) -> None:
+        """전략 엔진 실행 (T078).
+
+        market_data_queue에서 데이터를 소비하는 백그라운드 태스크를 시작합니다.
+        """
+        if self.consumer_task is not None and not self.consumer_task.done():
+            logger.warning("Strategy engine is already running")
+            return
+
+        self.consumer_task = asyncio.create_task(self.consume_market_data())
+        logger.info("Strategy engine started")
+
+    async def stop(self) -> None:
+        """전략 엔진 중지 (T078)."""
+        if not self.running:
+            return
+
+        logger.info("Stopping strategy engine")
+        self.running = False
+
+        # Consumer 태스크 취소 대기
+        if self.consumer_task and not self.consumer_task.done():
+            self.consumer_task.cancel()
+            try:
+                await self.consumer_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info("Strategy engine stopped")
