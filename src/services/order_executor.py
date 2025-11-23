@@ -1,6 +1,7 @@
 """주문 실행 서비스.
 
 주문 검증, 제출, 상태 추적을 담당하는 핵심 컴포넌트입니다.
+T086: RiskManager 통합하여 주문 전 위험 검증을 수행합니다.
 """
 
 from datetime import datetime
@@ -16,6 +17,7 @@ from ..models.stock import Stock
 from ..utils.logger import get_logger
 from .duplicate_checker import DuplicateOrderChecker
 from .order_validator import OrderValidator
+from .risk_manager import RiskManager
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_logger(__name__)
@@ -68,7 +70,8 @@ class OrderExecutor:
         self,
         client: KiwoomClientProtocol,
         pending_orders: Dict[str, Order],
-        positions: Dict[str, Position]
+        positions: Dict[str, Position],
+        risk_manager: Optional[RiskManager] = None
     ):
         """OrderExecutor를 초기화합니다.
 
@@ -76,12 +79,20 @@ class OrderExecutor:
             client: Kiwoom API 클라이언트 (실제 또는 Simulator)
             pending_orders: 진행 중인 주문 딕셔너리 (order_id -> Order)
             positions: 현재 포지션 딕셔너리 (stock_code -> Position)
+            risk_manager: 위험 관리자 (T086). None이면 기본 설정으로 생성.
         """
         self.client = client
         self.pending_orders = pending_orders
         self.positions = positions
         self.validator = OrderValidator()
         self.duplicate_checker = DuplicateOrderChecker(pending_orders)
+        
+        # T086: RiskManager 통합
+        self.risk_manager = risk_manager or RiskManager(
+            daily_loss_limit_pct=Decimal("0.02"),  # 기본값: 2%
+            max_position_concentration=Decimal("0.3"),  # 기본값: 30%
+            warning_threshold=Decimal("0.8")  # 기본값: 80%
+        )
 
     async def execute_order(self, order: Order) -> tuple[bool, Optional[str], Optional[Order]]:
         """주문을 검증하고 실행합니다.
@@ -127,11 +138,27 @@ class OrderExecutor:
             # 3. 계좌 정보 조회
             account = await self.client.get_account()
 
-            # 4. 현재 가격 조회
+            # T086: 4. 위험 관리 검증 (주문 전)
+            should_stop, risk_message = self.risk_manager.should_stop_trading(
+                account,
+                list(self.positions.values())
+            )
+
+            if should_stop:
+                logger.error(f"[위험 관리] 거래 중단: {risk_message}")
+                order.status = OrderStatus.REJECTED
+                order.error_message = f"[위험 관리] {risk_message}"
+                return False, risk_message, None
+
+            # 경고 메시지가 있다면 로그 출력 (중단은 아님)
+            if risk_message:
+                logger.warning(f"[위험 관리] 경고: {risk_message}")
+
+            # 5. 현재 가격 조회
             stock_info = await self.client.get_stock_price(order.stock_code)
             current_price = stock_info.current_price
 
-            # 5. 주문 유형별 검증
+            # # 6. 주문 유형별 검증
             if order.order_type == OrderType.BUY:
                 is_valid, error_msg = self.validator.validate_buy_order(
                     account,
@@ -151,7 +178,7 @@ class OrderExecutor:
                 order.error_message = error_msg
                 return False, error_msg, None
 
-            # 6. 주문 제출
+            # # 7. 주문 제출
             logger.info(f"주문 제출 중: {order.order_id}")
             order.status = OrderStatus.SUBMITTED
             order.submitted_at = datetime.now(tz=KST)
@@ -162,7 +189,7 @@ class OrderExecutor:
             # API 호출
             filled_order = await self.client.submit_order(order)
 
-            # 7. 체결 결과 처리
+            # # 8. 체결 결과 처리
             if filled_order.status == OrderStatus.FILLED:
                 logger.info(
                     f"주문 체결 완료: {filled_order.order_id} - "

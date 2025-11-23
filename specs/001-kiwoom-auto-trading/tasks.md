@@ -301,14 +301,14 @@
 
 ### 8.2 테스트 (Simulator 기반)
 
-- [ ] T083 [P] [US5] RiskManager 일일 손실 한도 체크 단위 테스트 in tests/unit/test_risk_manager.py
-- [ ] T084 [P] [US5] RiskManager 포지션 집중도 체크 단위 테스트 in tests/unit/test_risk_manager.py
-- [ ] T085 [US5] 위험 관리 통합 테스트 (한도 초과 시 자동 매매 중단) in tests/integration/test_risk_management.py
+- [X] T083 [P] [US5] RiskManager 일일 손실 한도 체크 단위 테스트 in tests/unit/test_risk_manager.py
+- [X] T084 [P] [US5] RiskManager 포지션 집중도 체크 단위 테스트 in tests/unit/test_risk_manager.py
+- [X] T085 [US5] 위험 관리 통합 테스트 (한도 초과 시 자동 매매 중단) in tests/integration/test_risk_management.py
 
 ### 8.3 통합
 
-- [ ] T086 [US5] OrderExecutor에 RiskManager 통합 (주문 전 위험 검증)
-- [ ] T087 [US5] StrategyEngine에 위험 관리 로직 추가 (매 주문 전 위험 체크)
+- [X] T086 [US5] OrderExecutor에 RiskManager 통합 (주문 전 위험 검증)
+- [X] T087 [US5] StrategyEngine에 위험 관리 로직 추가 (매 주문 전 위험 체크)
 
 **Checkpoint**: User Story 5 완료 - 위험 관리 로직이 정상 작동하여 안전하게 주문이 실행되어야 함
 

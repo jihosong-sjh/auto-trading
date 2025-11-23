@@ -4,6 +4,7 @@
 
 T078: DataCollector와 asyncio.Queue를 통해 통합되어,
       실시간 시세 데이터를 수신하여 전략 평가를 수행합니다.
+T087: RiskManager를 통합하여 매 주문 전 위험 검증을 수행합니다.
 """
 
 import asyncio
@@ -18,6 +19,9 @@ from pydantic import BaseModel, Field
 
 from ..models import Stock
 from ..models.strategy import BaseStrategy
+from ..models.account import Account
+from ..models.position import Position
+from .risk_manager import RiskManager
 
 
 logger = logging.getLogger(__name__)
@@ -48,23 +52,33 @@ class StrategyEngine:
     """전략 엔진.
 
     YAML 파일에서 전략 설정을 로드하고, importlib을 사용하여 동적으로 전략 클래스를 생성합니다.
+    T087: RiskManager를 통합하여 매 주문 전 위험 검증을 수행합니다.
 
     Attributes:
         config_path: 전략 설정 YAML 파일 경로
         strategies: 로드된 전략 인스턴스 딕셔너리 (strategy_name -> BaseStrategy)
         strategy_configs: 전략 설정 딕셔너리 (strategy_name -> StrategyConfig)
+        risk_manager: 위험 관리자 (T087)
+        account: 현재 계좌 정보
+        positions: 현재 포지션 딕셔너리
     """
 
     def __init__(
         self,
         config_path: Optional[Path] = None,
-        market_data_queue: Optional[asyncio.Queue] = None
+        market_data_queue: Optional[asyncio.Queue] = None,
+        risk_manager: Optional[RiskManager] = None,
+        account: Optional[Account] = None,
+        positions: Optional[Dict[str, Position]] = None
     ):
         """전략 엔진 초기화.
 
         Args:
             config_path: 전략 설정 YAML 파일 경로. None이면 기본 경로 사용.
             market_data_queue: 시장 데이터를 수신할 asyncio.Queue (T078).
+            risk_manager: 위험 관리자 (T087). None이면 기본 설정으로 생성.
+            account: 현재 계좌 정보 (T087).
+            positions: 현재 포지션 딕셔너리 (T087).
         """
         self.config_path = config_path or Path("config/strategies.yaml")
         self.strategies: Dict[str, BaseStrategy] = {}
@@ -74,6 +88,15 @@ class StrategyEngine:
         self.market_data_queue = market_data_queue
         self.running = False
         self.consumer_task: Optional[asyncio.Task] = None
+        
+        # T087: RiskManager 통합
+        self.risk_manager = risk_manager or RiskManager(
+            daily_loss_limit_pct=Decimal("0.02"),  # 기본값: 2%
+            max_position_concentration=Decimal("0.3"),  # 기본값: 30%
+            warning_threshold=Decimal("0.8")  # 기본값: 80%
+        )
+        self.account = account
+        self.positions = positions or {}
 
     def load_strategies_from_yaml(self) -> List[StrategyConfig]:
         """YAML 파일에서 전략 설정 로드.
@@ -360,9 +383,27 @@ class StrategyEngine:
     async def _evaluate_strategies(self, stock: Stock) -> None:
         """모든 전략에 대해 시그널 평가 (내부 메서드).
 
+        T087: 주문 생성 전 위험 관리 검증을 수행합니다.
+
         Args:
             stock: 평가할 종목 데이터.
         """
+        # T087: 위험 관리 검증 (주문 전)
+        if self.account and self.positions is not None:
+            should_stop, risk_message = self.risk_manager.should_stop_trading(
+                self.account,
+                list(self.positions.values())
+            )
+
+            if should_stop:
+                logger.error(f"[위험 관리] 거래 중단: {risk_message}")
+                logger.info("전략 평가를 중단합니다.")
+                return
+
+            # 경고 메시지가 있다면 로그 출력 (중단은 아님)
+            if risk_message:
+                logger.warning(f"[위험 관리] 경고: {risk_message}")
+
         for strategy_name, strategy in self.strategies.items():
             try:
                 # 매수 시그널 평가
@@ -374,6 +415,7 @@ class StrategyEngine:
                         f"at {stock.current_price}"
                     )
                     # TODO: 실제 주문 실행 로직 (OrderExecutor 호출)
+                    # OrderExecutor가 다시 한 번 위험 검증을 수행합니다 (T086)
 
                 # 매도 시그널 평가
                 # TODO: 현재 포지션이 있는지 확인 필요
