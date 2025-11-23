@@ -403,27 +403,27 @@
 ### 12.1 메인 애플리케이션
 
 - [ ] T116 TradingSystem 메인 클래스 구현 in src/cli/main.py (모든 서비스 통합, asyncio event loop 관리)
-- [ ] T117 CLI 명령 파서 구현 (start, stop, status, backtest, validate-config, test-api 등)
-- [ ] T118 Graceful shutdown 로직 구현 (SIGINT 핸들러, 모든 태스크 정리)
+- [X] T117 CLI 명령 파서 구현 (start, stop, status, backtest, validate-config, test-api 등)
+- [X] T118 Graceful shutdown 로직 구현 (SIGINT 핸들러, 모든 태스크 정리)
 
 ### 12.2 CLI 명령 구현
 
-- [ ] T119 [P] CLI 'start' 명령 구현 (시스템 시작, 시뮬레이터/실전 모드 선택)
-- [ ] T120 [P] CLI 'stop' 명령 구현 (시스템 중지, 포지션 보존)
-- [ ] T121 [P] CLI 'emergency-stop' 명령 구현 (긴급 중단, 모든 주문 취소)
-- [ ] T122 [P] CLI 'validate-config' 명령 구현 (설정 파일 검증)
-- [ ] T123 [P] CLI 'test-api' 명령 구현 (API 연결 테스트)
+- [X] T119 [P] CLI 'start' 명령 구현 (시스템 시작, 시뮬레이터/실전 모드 선택)
+- [X] T120 [P] CLI 'stop' 명령 구현 (시스템 중지, 포지션 보존)
+- [X] T121 [P] CLI 'emergency-stop' 명령 구현 (긴급 중단, 모든 주문 취소)
+- [X] T122 [P] CLI 'validate-config' 명령 구현 (설정 파일 검증)
+- [X] T123 [P] CLI 'test-api' 명령 구현 (API 연결 테스트)
 
 ### 12.3 백테스팅 모드
 
-- [ ] T124 BacktestEngine 구현 in src/services/backtest_engine.py (과거 데이터 기반 시뮬레이션)
-- [ ] T125 CLI 'backtest' 명령 구현 (전략, 기간, 초기 자금 지정)
-- [ ] T126 백테스팅 결과 리포트 생성 (총 손익, 승률, Sharpe Ratio, 최대 낙폭)
+- [X] T124 BacktestEngine 구현 in src/services/backtest_engine.py (과거 데이터 기반 시뮬레이션)
+- [X] T125 CLI 'backtest' 명령 구현 (전략, 기간, 초기 자금 지정)
+- [X] T126 백테스팅 결과 리포트 생성 (총 손익, 승률, Sharpe Ratio, 최대 낙폭)
 
 ### 12.4 통합 테스트
 
-- [ ] T127 전체 시스템 통합 테스트 in tests/integration/test_full_system.py (시작 → 데이터 수집 → 전략 실행 → 주문 → 중지)
-- [ ] T128 백테스트 모드 통합 테스트 in tests/integration/test_backtest.py
+- [X] T127 전체 시스템 통합 테스트 in tests/integration/test_full_system.py (시작 → 데이터 수집 → 전략 실행 → 주문 → 중지)
+- [X] T128 백테스트 모드 통합 테스트 in tests/integration/test_backtest.py
 
 **Checkpoint**: 시스템 통합 완료 - CLI로 시스템을 시작/중지하고 전체 플로우가 정상 작동해야 함
 
