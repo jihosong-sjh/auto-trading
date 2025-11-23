@@ -246,8 +246,8 @@
 
 ### 6.1 서비스 레이어
 
-- [ ] T065 [US2] AccountService 구현 in src/services/account_service.py (계좌 정보 조회, 업데이트, 일일 손익 계산)
-- [ ] T066 [US2] PositionService 구현 in src/services/position_service.py (포지션 CRUD, 평가 손익 계산)
+- [X] T065 [US2] AccountService 구현 in src/services/account_service.py (계좌 정보 조회, 업데이트, 일일 손익 계산)
+- [X] T066 [US2] PositionService 구현 in src/services/position_service.py (포지션 CRUD, 평가 손익 계산)
 
 ### 6.2 테스트 (Simulator 기반)
 
