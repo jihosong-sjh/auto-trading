@@ -169,18 +169,18 @@
 
 ### 4.1 전략 구현 (Strategy)
 
-- [ ] T039 [P] [US1] GoldenCrossStrategy 구현 in src/strategies/golden_cross.py (BaseStrategy 상속, SMA 계산 포함)
-- [ ] T040 [US1] 전략 동적 로딩 시스템 구현 in src/services/strategy_engine.py (YAML에서 전략 로드, importlib 사용)
+- [X] T039 [P] [US1] GoldenCrossStrategy 구현 in src/strategies/golden_cross.py (BaseStrategy 상속, SMA 계산 포함)
+- [X] T040 [US1] 전략 동적 로딩 시스템 구현 in src/services/strategy_engine.py (YAML에서 전략 로드, importlib 사용)
 
 ### 4.2 전략 테스트 (Simulator 기반 - Mock 없음!)
 
-- [ ] T041 [P] [US1] GoldenCrossStrategy 매수 시그널 통합 테스트 in tests/integration/test_golden_cross_strategy.py
+- [X] T041 [P] [US1] GoldenCrossStrategy 매수 시그널 통합 테스트 in tests/integration/test_golden_cross_strategy.py
   - **중요**: `from src.simulator.kiwoom_simulator import KiwoomSimulator` import
   - Simulator에 과거 가격 데이터 주입
   - 골든크로스 발생 시 매수 주문이 생성되는지 확인
-- [ ] T042 [P] [US1] GoldenCrossStrategy 매도 시그널 통합 테스트 in tests/integration/test_golden_cross_strategy.py
+- [X] T042 [P] [US1] GoldenCrossStrategy 매도 시그널 통합 테스트 in tests/integration/test_golden_cross_strategy.py
   - 데드크로스 발생 시 매도 주문이 생성되는지 확인
-- [ ] T043 [P] [US1] GoldenCrossStrategy 전체 시나리오 테스트 in tests/integration/test_golden_cross_strategy.py
+- [X] T043 [P] [US1] GoldenCrossStrategy 전체 시나리오 테스트 in tests/integration/test_golden_cross_strategy.py
   - 매수 → 가격 상승 → 매도 → 손익 확인
 
 ### 4.3 주문 실행 (Order Execution)
