@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -29,6 +29,7 @@ from .exceptions import (
     RateLimitExceededError,
 )
 from .rate_limiter import RateLimiter
+from ..cache.distributed_rate_limiter import DistributedRateLimiter
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_logger(__name__)
@@ -55,9 +56,20 @@ class KiwoomClient:
         account_number: str,
         base_url: str = "https://api.kiwoom.com",
         max_requests_per_second: int = 15,
-        request_timeout: float = 10.0
+        request_timeout: float = 10.0,
+        distributed_rate_limiter: Optional[DistributedRateLimiter] = None
     ):
-        """KiwoomClient 초기화."""
+        """KiwoomClient 초기화.
+
+        Args:
+            api_key: API 키
+            api_secret: API 시크릿
+            account_number: 계좌번호
+            base_url: API 베이스 URL
+            max_requests_per_second: 초당 최대 요청 수
+            request_timeout: 요청 타임아웃 (초)
+            distributed_rate_limiter: Redis 기반 분산 rate limiter (옵션)
+        """
         self.api_key = api_key
         self.api_secret = api_secret
         self.account_number = account_number
@@ -65,7 +77,13 @@ class KiwoomClient:
         self.request_timeout = request_timeout
 
         self.client: httpx.AsyncClient | None = None
-        self.rate_limiter = RateLimiter(max_requests=max_requests_per_second, time_window=1.0)
+
+        # 분산 rate limiter가 제공되면 우선 사용, 없으면 로컬 사용
+        self.distributed_rate_limiter = distributed_rate_limiter
+        self.local_rate_limiter = RateLimiter(max_requests=max_requests_per_second, time_window=1.0)
+
+        # 분산 환경 여부 플래그
+        self.use_distributed = distributed_rate_limiter is not None
 
         self.access_token: str | None = None
         self.token_expires_at: datetime | None = None
@@ -90,11 +108,22 @@ class KiwoomClient:
                     "Accept": "application/json"
                 }
             )
+
+        # Rate limiter 시작 (로컬 rate limiter만 필요)
+        await self.local_rate_limiter.start()
+
         await self._refresh_token()
-        logger.info("Kiwoom API client connected successfully")
+
+        if self.use_distributed:
+            logger.info("Kiwoom API client connected with distributed rate limiter")
+        else:
+            logger.info("Kiwoom API client connected with local rate limiter")
 
     async def close(self) -> None:
         """API 클라이언트 연결 종료."""
+        # Rate limiter 종료
+        await self.local_rate_limiter.stop()
+
         if self.client:
             await self.client.aclose()
             self.client = None
@@ -184,7 +213,20 @@ class KiwoomClient:
             raise KiwoomAPIError("Client not connected. Call connect() first.")
 
         await self._ensure_authenticated()
-        await self.rate_limiter.acquire()
+
+        # Rate limiting: 분산 또는 로컬 사용
+        if self.use_distributed and self.distributed_rate_limiter:
+            # Redis 기반 분산 rate limiter 사용
+            success = await self.distributed_rate_limiter.acquire(
+                identifier="kiwoom_api",
+                wait=True,
+                timeout=30.0
+            )
+            if not success:
+                raise RateLimitExceededError("Distributed rate limit exceeded")
+        else:
+            # 로컬 rate limiter 사용
+            await self.local_rate_limiter.acquire()
 
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self.access_token}"

@@ -377,16 +377,8 @@ class StaggeredPricePoller:
 
         logger.debug(f"Started polling for {stock_code} (delay: {initial_delay:.3f}s)")
 
-        # Redis 캐시 사용 여부 확인
-        redis_cache = None
-        if hasattr(self, 'redis_price_cache'):
-            # DataCollector의 Redis 캐시 참조 가져오기
-            import inspect
-            frame = inspect.currentframe()
-            if frame and frame.f_back and frame.f_back.f_locals.get('self'):
-                parent = frame.f_back.f_locals['self']
-                if hasattr(parent, 'redis_price_cache'):
-                    redis_cache = parent.redis_price_cache
+        # Redis 캐시 사용 여부 확인 (직접 속성으로 접근)
+        redis_cache = getattr(self, 'redis_price_cache', None)
 
         try:
             while self.running:
@@ -727,18 +719,18 @@ class DataCollector:
             self.price_cache = PriceCache(base_ttl=2, max_ttl=10, min_ttl=1)
             logger.info("DataCollector using in-memory cache")
 
-        # T073: 분산 폴링 인스턴스
+        # T073: 분산 폴링 인스턴스 (설정값 사용)
         self.price_poller = StaggeredPricePoller(
             client=client,
             stock_codes=self.stock_codes,
             market_data_queue=market_data_queue,
-            interval_seconds=1.0,
+            interval_seconds=config.data_polling_interval,  # 설정에서 읽음
             price_cache=self.price_cache  # PriceCache 전달
         )
 
         # 스마트 폴링 인스턴스 (선택적 사용)
         self.smart_poller: SmartPricePoller | None = None
-        self.use_smart_polling = False  # 스마트 폴링 사용 여부
+        self.use_smart_polling = config.use_smart_polling  # 설정에서 읽음
 
         # T075: 타임아웃 감지용
         self.last_data_received_at: datetime | None = None
@@ -746,7 +738,7 @@ class DataCollector:
         self.monitor_task: asyncio.Task | None = None
 
     async def initialize_redis(self) -> None:
-        """Redis 연결 초기화."""
+        """Redis 연결 초기화 및 관련 컴포넌트 재설정."""
         if not self.use_redis:
             return
 
@@ -786,16 +778,50 @@ class DataCollector:
             )
             await self.shared_data.initialize()
 
+            # CRITICAL FIX: StaggeredPricePoller를 Redis 캐시와 함께 재생성
+            # Redis 초기화 후에 poller를 재생성하여 올바른 캐시를 사용하도록 함
+            self.price_poller = StaggeredPricePoller(
+                client=self.client,
+                stock_codes=self.stock_codes,
+                market_data_queue=self.market_data_queue,
+                interval_seconds=self.config.data_polling_interval,  # 설정값 사용
+                price_cache=self.redis_price_cache  # Redis 캐시 사용
+            )
+            # Poller에 Redis 캐시 직접 설정 (추가 보장)
+            self.price_poller.redis_price_cache = self.redis_price_cache
+
+            # KiwoomClient에 분산 rate limiter 전달
+            if hasattr(self.client, 'distributed_rate_limiter'):
+                self.client.distributed_rate_limiter = self.redis_rate_limiter
+                self.client.use_distributed = True
+                logger.info("Distributed rate limiter connected to KiwoomClient")
+
             logger.info(
                 f"Redis initialized: {self.config.redis_host}:{self.config.redis_port}, "
-                f"rate_limit={rate_limit}/s"
+                f"rate_limit={rate_limit}/s, Redis cache connected to poller"
             )
 
         except Exception as e:
             logger.error(f"Failed to initialize Redis: {e}")
-            logger.warning("Falling back to in-memory cache")
+            logger.warning("Falling back to in-memory cache and local rate limiter")
             self.use_redis = False
+
+            # Fallback: In-memory 캐시 생성
             self.price_cache = PriceCache(base_ttl=2, max_ttl=10, min_ttl=1)
+
+            # Fallback: Poller를 in-memory 캐시로 재생성
+            self.price_poller = StaggeredPricePoller(
+                client=self.client,
+                stock_codes=self.stock_codes,
+                market_data_queue=self.market_data_queue,
+                interval_seconds=self.config.data_polling_interval,  # 설정값 사용
+                price_cache=self.price_cache  # In-memory 캐시 사용
+            )
+
+            # KiwoomClient를 로컬 rate limiter 사용으로 전환
+            if hasattr(self.client, 'use_distributed'):
+                self.client.use_distributed = False
+                logger.info("KiwoomClient reverted to local rate limiter")
 
     async def close_redis(self) -> None:
         """Redis 연결 종료."""

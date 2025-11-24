@@ -163,6 +163,17 @@ class Settings(BaseSettings):
         default=1.0, description="변동성 임계값 (%) - TTL 조정 기준"
     )
 
+    # 데이터 수집 설정
+    data_polling_interval: float = Field(
+        default=1.0,
+        description="데이터 폴링 간격 (초) - 키움 API rate limit을 고려하여 설정",
+        alias="DATA_POLLING_INTERVAL"
+    )
+    use_smart_polling: bool = Field(
+        default=True,
+        description="스마트 폴링 활성화 여부 - 포지션 보유 종목 우선 폴링"
+    )
+
     # 전략 및 종목 설정
     watch_symbols: List[str] = Field(
         default_factory=lambda: ["005930", "000660", "035420", "051910"],
