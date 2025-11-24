@@ -6,7 +6,7 @@ import pytest
 
 from src.models.account import Account
 from src.models.position import Position
-from src.services.risk_manager import RiskManager
+from src.services.risk_manager import RiskManager, TriggerAction
 
 
 class TestRiskManagerInitialization:
@@ -451,3 +451,270 @@ class TestRiskManagerPositionConcentration:
         assert exceeded is True
         assert "25.0%" in message
         assert "20%" in message
+
+
+class TestRiskManagerStopLossTakeProfit:
+    """Phase 5: Stop-Loss/Take-Profit 모니터링 테스트."""
+
+    def test_check_position_trigger_stop_loss_triggered(self):
+        """손절가 트리거 발생 - 현재가가 손절가 이하."""
+        # Given
+        risk_manager = RiskManager()
+
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("63000"),  # 10% 하락
+            stop_loss_price=Decimal("63000"),  # 손절가 설정
+            take_profit_price=Decimal("77000")
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is True
+        assert action == TriggerAction.STOP_LOSS
+        assert message is not None
+        assert "[STOP-LOSS]" in message
+        assert "005930" in message
+        assert "63,000" in message
+
+    def test_check_position_trigger_take_profit_triggered(self):
+        """익절가 트리거 발생 - 현재가가 익절가 이상."""
+        # Given
+        risk_manager = RiskManager()
+
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("77000"),  # 10% 상승
+            stop_loss_price=Decimal("63000"),
+            take_profit_price=Decimal("77000")  # 익절가 설정
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is True
+        assert action == TriggerAction.TAKE_PROFIT
+        assert message is not None
+        assert "[TAKE-PROFIT]" in message
+        assert "005930" in message
+        assert "77,000" in message
+
+    def test_check_position_trigger_no_trigger(self):
+        """트리거 없음 - 현재가가 정상 범위."""
+        # Given
+        risk_manager = RiskManager()
+
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("70000"),  # 변동 없음
+            stop_loss_price=Decimal("63000"),
+            take_profit_price=Decimal("77000")
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is False
+        assert action is None
+        assert message is None
+
+    def test_check_position_trigger_no_stop_loss_set(self):
+        """손절가가 설정되지 않은 경우 - 트리거 없음."""
+        # Given
+        risk_manager = RiskManager()
+
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("60000"),  # 큰 하락이지만 손절가 미설정
+            stop_loss_price=None,  # 손절가 미설정
+            take_profit_price=Decimal("77000")
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is False
+        assert action is None
+        assert message is None
+
+    def test_check_position_trigger_stop_loss_priority_over_take_profit(self):
+        """손절가와 익절가 동시 트리거 시 손절가 우선."""
+        # Given
+        risk_manager = RiskManager()
+
+        # 비현실적이지만 테스트를 위해: 손절가와 익절가 모두 트리거
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("70000"),
+            stop_loss_price=Decimal("70000"),  # 현재가와 동일 (트리거)
+            take_profit_price=Decimal("70000")  # 현재가와 동일 (트리거)
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is True
+        assert action == TriggerAction.STOP_LOSS  # 손절가 우선
+        assert "[STOP-LOSS]" in message
+
+    def test_monitor_all_positions_multiple_triggers(self):
+        """여러 포지션 중 일부만 트리거 발생."""
+        # Given
+        risk_manager = RiskManager()
+
+        positions = [
+            Position(
+                account_number="12345678",
+                stock_code="005930",
+                quantity=100,
+                average_buy_price=Decimal("70000"),
+                current_price=Decimal("63000"),  # 손절 트리거
+                stop_loss_price=Decimal("63000"),
+                take_profit_price=Decimal("77000")
+            ),
+            Position(
+                account_number="12345678",
+                stock_code="000660",
+                quantity=50,
+                average_buy_price=Decimal("100000"),
+                current_price=Decimal("105000"),  # 정상 범위
+                stop_loss_price=Decimal("90000"),
+                take_profit_price=Decimal("110000")
+            ),
+            Position(
+                account_number="12345678",
+                stock_code="035720",
+                quantity=200,
+                average_buy_price=Decimal("50000"),
+                current_price=Decimal("55000"),  # 익절 트리거
+                stop_loss_price=Decimal("45000"),
+                take_profit_price=Decimal("55000")
+            )
+        ]
+
+        # When
+        triggered_list = risk_manager.monitor_all_positions(positions)
+
+        # Then
+        assert len(triggered_list) == 2
+
+        # 첫 번째: 005930 손절
+        pos1, action1, msg1 = triggered_list[0]
+        assert pos1.stock_code == "005930"
+        assert action1 == TriggerAction.STOP_LOSS
+        assert "[STOP-LOSS]" in msg1
+
+        # 두 번째: 035720 익절
+        pos2, action2, msg2 = triggered_list[1]
+        assert pos2.stock_code == "035720"
+        assert action2 == TriggerAction.TAKE_PROFIT
+        assert "[TAKE-PROFIT]" in msg2
+
+    def test_monitor_all_positions_no_triggers(self):
+        """모든 포지션이 정상 범위 - 트리거 없음."""
+        # Given
+        risk_manager = RiskManager()
+
+        positions = [
+            Position(
+                account_number="12345678",
+                stock_code="005930",
+                quantity=100,
+                average_buy_price=Decimal("70000"),
+                current_price=Decimal("70000"),
+                stop_loss_price=Decimal("63000"),
+                take_profit_price=Decimal("77000")
+            ),
+            Position(
+                account_number="12345678",
+                stock_code="000660",
+                quantity=50,
+                average_buy_price=Decimal("100000"),
+                current_price=Decimal("105000"),
+                stop_loss_price=Decimal("90000"),
+                take_profit_price=Decimal("110000")
+            )
+        ]
+
+        # When
+        triggered_list = risk_manager.monitor_all_positions(positions)
+
+        # Then
+        assert len(triggered_list) == 0
+
+    def test_monitor_all_positions_empty_list(self):
+        """포지션이 없는 경우 - 빈 리스트 반환."""
+        # Given
+        risk_manager = RiskManager()
+        positions = []
+
+        # When
+        triggered_list = risk_manager.monitor_all_positions(positions)
+
+        # Then
+        assert len(triggered_list) == 0
+
+    def test_stop_loss_message_includes_loss_info(self):
+        """손절 메시지에 손실 정보 포함 확인."""
+        # Given
+        risk_manager = RiskManager()
+
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("63000"),  # 7000원 * 100주 = 70만원 손실
+            stop_loss_price=Decimal("63000")
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is True
+        assert "700,000" in message  # 예상 손실 70만원
+        assert "-10.00%" in message  # 손실률 10%
+
+    def test_take_profit_message_includes_profit_info(self):
+        """익절 메시지에 수익 정보 포함 확인."""
+        # Given
+        risk_manager = RiskManager()
+
+        position = Position(
+            account_number="12345678",
+            stock_code="005930",
+            quantity=100,
+            average_buy_price=Decimal("70000"),
+            current_price=Decimal("77000"),  # 7000원 * 100주 = 70만원 수익
+            take_profit_price=Decimal("77000")
+        )
+
+        # When
+        triggered, action, message = risk_manager.check_position_trigger(position)
+
+        # Then
+        assert triggered is True
+        assert "700,000" in message  # 예상 수익 70만원
+        assert "10.00%" in message  # 수익률 10%

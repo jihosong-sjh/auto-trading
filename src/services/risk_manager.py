@@ -2,13 +2,26 @@
 
 이 모듈은 자동매매 시스템의 위험 관리 기능을 제공합니다.
 일일 손실 한도(%), 포지션 집중도 체크, 거래 중단 판단 등의 기능을 포함합니다.
+Phase 5: 실시간 Stop-Loss/Take-Profit 모니터링 기능 추가.
 """
 
 from decimal import Decimal
+from enum import Enum
 from typing import List, Optional, Tuple
 
 from ..models.account import Account
 from ..models.position import Position
+
+
+class TriggerAction(str, Enum):
+    """포지션 트리거 액션 타입.
+
+    Attributes:
+        STOP_LOSS: 손절 트리거 발생.
+        TAKE_PROFIT: 익절 트리거 발생.
+    """
+    STOP_LOSS = "STOP_LOSS"
+    TAKE_PROFIT = "TAKE_PROFIT"
 
 
 class RiskManager:
@@ -169,3 +182,87 @@ class RiskManager:
             return False, " | ".join(messages)
 
         return False, None
+
+    def check_position_trigger(
+        self,
+        position: Position
+    ) -> Tuple[bool, Optional[TriggerAction], Optional[str]]:
+        """단일 포지션의 손절/익절 트리거를 확인합니다.
+
+        Args:
+            position: 확인할 포지션.
+
+        Returns:
+            Tuple[bool, Optional[TriggerAction], Optional[str]]:
+                - bool: 트리거 발생 여부
+                - Optional[TriggerAction]: 트리거 액션 타입 (STOP_LOSS 또는 TAKE_PROFIT)
+                - Optional[str]: 트리거 메시지
+
+        Examples:
+            >>> position = Position(...)
+            >>> triggered, action, message = risk_manager.check_position_trigger(position)
+            >>> if triggered:
+            ...     print(f"Action: {action}, Message: {message}")
+        """
+        # 1. 손절가 트리거 확인 (우선순위 높음)
+        if position.check_stop_loss_triggered():
+            loss_amount = (position.average_buy_price - position.current_price) * position.quantity
+            loss_rate = ((position.current_price - position.average_buy_price)
+                        / position.average_buy_price * 100)
+
+            message = (
+                f"[STOP-LOSS] 종목 {position.stock_code} 손절 트리거 발생\n"
+                f"- 현재가: {position.current_price:,.0f}원\n"
+                f"- 손절가: {position.stop_loss_price:,.0f}원\n"
+                f"- 평균 매수가: {position.average_buy_price:,.0f}원\n"
+                f"- 손실률: {loss_rate:.2f}%\n"
+                f"- 예상 손실: {loss_amount:,.0f}원"
+            )
+            return True, TriggerAction.STOP_LOSS, message
+
+        # 2. 익절가 트리거 확인
+        if position.check_take_profit_triggered():
+            profit_amount = (position.current_price - position.average_buy_price) * position.quantity
+            profit_rate = ((position.current_price - position.average_buy_price)
+                          / position.average_buy_price * 100)
+
+            message = (
+                f"[TAKE-PROFIT] 종목 {position.stock_code} 익절 트리거 발생\n"
+                f"- 현재가: {position.current_price:,.0f}원\n"
+                f"- 익절가: {position.take_profit_price:,.0f}원\n"
+                f"- 평균 매수가: {position.average_buy_price:,.0f}원\n"
+                f"- 수익률: {profit_rate:.2f}%\n"
+                f"- 예상 수익: {profit_amount:,.0f}원"
+            )
+            return True, TriggerAction.TAKE_PROFIT, message
+
+        return False, None, None
+
+    def monitor_all_positions(
+        self,
+        positions: List[Position]
+    ) -> List[Tuple[Position, TriggerAction, str]]:
+        """모든 포지션의 손절/익절 트리거를 실시간 모니터링합니다.
+
+        Args:
+            positions: 모니터링할 포지션 리스트.
+
+        Returns:
+            트리거된 포지션 리스트: [(Position, TriggerAction, message), ...]
+            트리거가 없으면 빈 리스트 반환.
+
+        Examples:
+            >>> positions = [position1, position2, position3]
+            >>> triggered_list = risk_manager.monitor_all_positions(positions)
+            >>> for position, action, message in triggered_list:
+            ...     print(f"Position {position.stock_code}: {action.value}")
+            ...     # 자동 매도 주문 실행
+        """
+        triggered_positions = []
+
+        for position in positions:
+            triggered, action, message = self.check_position_trigger(position)
+            if triggered:
+                triggered_positions.append((position, action, message))
+
+        return triggered_positions
