@@ -131,6 +131,38 @@ class Settings(BaseSettings):
         default_factory=list, description="수신자 이메일 목록"
     )
 
+    # Redis 캐싱 설정
+    redis_host: str = Field(
+        default="localhost", description="Redis 호스트"
+    )
+    redis_port: int = Field(
+        default=6379, description="Redis 포트"
+    )
+    redis_db: int = Field(
+        default=0, description="Redis 데이터베이스 번호"
+    )
+    redis_password: Optional[str] = Field(
+        default=None, description="Redis 패스워드 (선택)"
+    )
+    redis_max_connections: int = Field(
+        default=50, description="Redis 최대 연결 수"
+    )
+    redis_enabled: bool = Field(
+        default=True, description="Redis 캐싱 활성화 여부"
+    )
+    redis_cache_ttl: int = Field(
+        default=60, description="기본 캐시 TTL (초)"
+    )
+    redis_price_ttl_min: int = Field(
+        default=1, description="가격 캐시 최소 TTL (초)"
+    )
+    redis_price_ttl_max: int = Field(
+        default=10, description="가격 캐시 최대 TTL (초)"
+    )
+    redis_volatility_threshold: float = Field(
+        default=1.0, description="변동성 임계값 (%) - TTL 조정 기준"
+    )
+
     # 전략 및 종목 설정
     watch_symbols: List[str] = Field(
         default_factory=lambda: ["005930", "000660", "035420", "051910"],

@@ -5,18 +5,35 @@ T072-T075 구현:
 - T073: StaggeredPricePoller (1초 간격, 종목별 분산 폴링)
 - T074: 차트 데이터 캐싱 (30초 TTL, 최대 1000개, 1 req/sec 제약 대응)
 - T075: 데이터 수신 타임아웃 감지 및 재연결 (3분 이상 데이터 없을 시 경고)
+
+Phase 2 Redis Integration:
+- Redis 기반 가격 캐싱 (적응형 TTL)
+- 분산 Rate Limiting
+- 프로세스간 데이터 공유
 """
 
 import asyncio
 from collections import OrderedDict
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from ..config.settings import Settings
 from ..models import ChartInterval, Stock
 from ..models.chart_data import ChartData
 from ..utils.logger import get_logger
+
+# Redis 캐시 모듈 (옵션)
+try:
+    from ..cache.redis_manager import RedisManager
+    from ..cache.price_cache import RedisPriceCache
+    from ..cache.distributed_rate_limiter import DistributedRateLimiter
+    from ..cache.shared_data import SharedDataManager
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    logger = get_logger(__name__)
+    logger.warning("Redis modules not available, using in-memory cache only")
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_logger(__name__)
@@ -360,11 +377,56 @@ class StaggeredPricePoller:
 
         logger.debug(f"Started polling for {stock_code} (delay: {initial_delay:.3f}s)")
 
+        # Redis 캐시 사용 여부 확인
+        redis_cache = None
+        if hasattr(self, 'redis_price_cache'):
+            # DataCollector의 Redis 캐시 참조 가져오기
+            import inspect
+            frame = inspect.currentframe()
+            if frame and frame.f_back and frame.f_back.f_locals.get('self'):
+                parent = frame.f_back.f_locals['self']
+                if hasattr(parent, 'redis_price_cache'):
+                    redis_cache = parent.redis_price_cache
+
         try:
             while self.running:
                 try:
-                    # 캐시 확인 (1 req/sec 제약 대응)
-                    if self.price_cache:
+                    # Redis 캐시 확인 (우선순위 1)
+                    if redis_cache:
+                        cached_data = await redis_cache.get(stock_code)
+                        if cached_data:
+                            # Redis 캐시 히트
+                            from ..models import Stock
+                            stock = Stock(
+                                code=stock_code,
+                                name=cached_data.get("name", ""),
+                                current_price=cached_data.get("price", 0),
+                                change=cached_data.get("change", 0),
+                                change_rate=cached_data.get("change_rate", 0),
+                                volume=cached_data.get("volume", 0)
+                            )
+                            await self.market_data_queue.put(stock)
+                            logger.debug(f"[REDIS HIT] {stock_code}: {stock.current_price:,.0f}")
+                        else:
+                            # Redis 캐시 미스: API 호출 후 Redis에 저장
+                            stock = await self.client.get_stock_price(stock_code)
+
+                            # Redis에 저장
+                            price_data = {
+                                "code": stock_code,
+                                "name": stock.name,
+                                "price": stock.current_price,
+                                "change": stock.change,
+                                "change_rate": stock.change_rate,
+                                "volume": stock.volume
+                            }
+                            await redis_cache.set(stock_code, price_data, write_through=True)
+
+                            await self.market_data_queue.put(stock)
+                            logger.debug(f"[REDIS MISS → API] {stock_code}: {stock.current_price:,.0f}")
+
+                    # In-memory 캐시 확인 (우선순위 2)
+                    elif self.price_cache:
                         cached_price = self.price_cache.get(stock_code)
                         if cached_price is not None:
                             # 캐시 히트: API 호출 없이 캐시된 데이터 사용
@@ -378,7 +440,7 @@ class StaggeredPricePoller:
                                 volume=0
                             )
                             await self.market_data_queue.put(stock)
-                            logger.debug(f"[CACHE HIT] {stock_code}: {cached_price:,.0f}")
+                            logger.debug(f"[MEMORY HIT] {stock_code}: {cached_price:,.0f}")
                         else:
                             # 캐시 미스: API 호출
                             stock = await self.client.get_stock_price(stock_code)
@@ -622,7 +684,8 @@ class DataCollector:
         client: Any,
         market_data_queue: asyncio.Queue,
         stock_codes: List[str] | None = None,
-        timeout_seconds: int = 180
+        timeout_seconds: int = 180,
+        use_redis: Optional[bool] = None
     ):
         """DataCollector 초기화.
 
@@ -632,6 +695,7 @@ class DataCollector:
             market_data_queue: 수집된 시세 데이터를 전달할 큐.
             stock_codes: 감시 대상 종목 코드 리스트 (None이면 설정에서 로드).
             timeout_seconds: 데이터 수신 타임아웃 (기본값: 180초 = 3분).
+            use_redis: Redis 사용 여부 (None이면 설정에서 확인).
         """
         self.config = config
         self.client = client
@@ -639,11 +703,29 @@ class DataCollector:
         self.stock_codes = stock_codes or []
         self.timeout_seconds = timeout_seconds
 
+        # Redis 사용 여부 결정
+        if use_redis is None:
+            use_redis = config.redis_enabled if hasattr(config, 'redis_enabled') else False
+        self.use_redis = use_redis and REDIS_AVAILABLE
+
+        # Redis 관련 인스턴스
+        self.redis_manager: Optional[RedisManager] = None
+        self.redis_price_cache: Optional[RedisPriceCache] = None
+        self.redis_rate_limiter: Optional[DistributedRateLimiter] = None
+        self.shared_data: Optional[SharedDataManager] = None
+
         # T074: 차트 데이터 캐시 (30초 TTL, 최대 1000개, 1 req/sec 제약 대응)
         self.chart_cache = ChartDataCache(ttl_seconds=30, max_size=1000)
 
-        # 가격 캐시 추가 (적응형 TTL, 1 req/sec 제약 대응)
-        self.price_cache = PriceCache(base_ttl=2, max_ttl=10, min_ttl=1)
+        # 가격 캐시 (Redis 또는 In-memory)
+        if self.use_redis:
+            # Redis 캐시 초기화는 별도로 수행
+            self.price_cache = None  # Redis 사용 시 in-memory 캐시 비활성화
+            logger.info("DataCollector configured to use Redis cache")
+        else:
+            # 기존 In-memory 캐시 사용
+            self.price_cache = PriceCache(base_ttl=2, max_ttl=10, min_ttl=1)
+            logger.info("DataCollector using in-memory cache")
 
         # T073: 분산 폴링 인스턴스
         self.price_poller = StaggeredPricePoller(
@@ -662,6 +744,75 @@ class DataCollector:
         self.last_data_received_at: datetime | None = None
         self.running = False
         self.monitor_task: asyncio.Task | None = None
+
+    async def initialize_redis(self) -> None:
+        """Redis 연결 초기화."""
+        if not self.use_redis:
+            return
+
+        try:
+            # Redis Manager 생성 및 초기화
+            self.redis_manager = RedisManager(
+                host=self.config.redis_host,
+                port=self.config.redis_port,
+                db=self.config.redis_db,
+                password=self.config.redis_password,
+                max_connections=self.config.redis_max_connections,
+                default_ttl=self.config.redis_cache_ttl
+            )
+            await self.redis_manager.initialize()
+
+            # Redis Price Cache 생성
+            self.redis_price_cache = RedisPriceCache(
+                redis_manager=self.redis_manager,
+                base_ttl=2,
+                min_ttl=self.config.redis_price_ttl_min,
+                max_ttl=self.config.redis_price_ttl_max,
+                volatility_threshold=self.config.redis_volatility_threshold
+            )
+
+            # 분산 Rate Limiter 생성
+            rate_limit = self.config.get_rate_limit_per_second()
+            self.redis_rate_limiter = DistributedRateLimiter(
+                redis_manager=self.redis_manager,
+                max_requests=rate_limit,
+                time_window=1
+            )
+
+            # Shared Data Manager 생성
+            self.shared_data = SharedDataManager(
+                redis_manager=self.redis_manager,
+                process_id=f"data_collector_{id(self)}"
+            )
+            await self.shared_data.initialize()
+
+            logger.info(
+                f"Redis initialized: {self.config.redis_host}:{self.config.redis_port}, "
+                f"rate_limit={rate_limit}/s"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to initialize Redis: {e}")
+            logger.warning("Falling back to in-memory cache")
+            self.use_redis = False
+            self.price_cache = PriceCache(base_ttl=2, max_ttl=10, min_ttl=1)
+
+    async def close_redis(self) -> None:
+        """Redis 연결 종료."""
+        if not self.use_redis:
+            return
+
+        try:
+            if self.shared_data:
+                await self.shared_data.close()
+
+            if self.redis_manager:
+                await self.redis_manager.close()
+
+            logger.info("Redis connections closed")
+
+        except Exception as e:
+            logger.error(f"Error closing Redis: {e}")
 
     def update_stock_codes(self, stock_codes: List[str]) -> None:
         """감시 대상 종목 코드 업데이트.
@@ -756,15 +907,21 @@ class DataCollector:
 
         T073 StaggeredPricePoller를 시작하고,
         T075 타임아웃 모니터링을 실행합니다.
+        Redis 사용 시 Redis 초기화를 먼저 수행합니다.
         """
         if self.running:
             logger.warning("DataCollector is already running")
             return
 
+        # Redis 초기화 (사용하는 경우)
+        if self.use_redis:
+            await self.initialize_redis()
+
         self.running = True
         logger.info(
             f"DataCollector started: {len(self.stock_codes)} stocks, "
-            f"timeout={self.timeout_seconds}s"
+            f"timeout={self.timeout_seconds}s, "
+            f"redis={'enabled' if self.use_redis else 'disabled'}"
         )
 
         try:
@@ -836,6 +993,10 @@ class DataCollector:
                 await self.monitor_task
             except asyncio.CancelledError:
                 pass
+
+        # Redis 연결 종료
+        if self.use_redis:
+            await self.close_redis()
 
         logger.info("DataCollector stopped and cleaned up")
 
