@@ -371,20 +371,20 @@
 
 ### 11.1 알림 구현
 
-- [ ] T105 [P] [US7] DiscordNotifier 구현 in src/services/notifier.py (discord-webhook 사용)
-- [ ] T106 [P] [US7] EmailNotifier 구현 in src/services/notifier.py (aiosmtplib 사용)
-- [ ] T107 [US7] NotificationManager 구현 (여러 알림 채널 통합 관리)
+- [X] T105 [P] [US7] DiscordNotifier 구현 in src/services/notifier.py (discord-webhook 사용)
+- [X] T106 [P] [US7] EmailNotifier 구현 in src/services/notifier.py (aiosmtplib 사용)
+- [X] T107 [US7] NotificationManager 구현 (여러 알림 채널 통합 관리)
 
 ### 11.2 리포트 생성
 
-- [ ] T108 [US7] DailyReportGenerator 구현 in src/services/report_generator.py (당일 거래 내역, 손익, 승률 계산)
-- [ ] T109 [US7] 장 마감 시 자동 리포트 전송 로직 구현 (15:30 KST)
+- [X] T108 [US7] DailyReportGenerator 구현 in src/services/report_generator.py (당일 거래 내역, 손익, 승률 계산)
+- [X] T109 [US7] 장 마감 시 자동 리포트 전송 로직 구현 (15:30 KST)
 
 ### 11.3 테스트
 
-- [ ] T110 [P] [US7] DiscordNotifier 단위 테스트 in tests/unit/test_notifier.py
-- [ ] T111 [P] [US7] EmailNotifier 단위 테스트 in tests/unit/test_notifier.py
-- [ ] T112 [US7] 일일 리포트 생성 통합 테스트 in tests/integration/test_daily_report.py
+- [X] T110 [P] [US7] DiscordNotifier 단위 테스트 in tests/unit/test_notifier.py
+- [X] T111 [P] [US7] EmailNotifier 단위 테스트 in tests/unit/test_notifier.py
+- [X] T112 [US7] 일일 리포트 생성 통합 테스트 in tests/integration/test_daily_report.py
 
 ### 11.4 통합
 

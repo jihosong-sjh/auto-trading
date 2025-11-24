@@ -33,6 +33,13 @@ class OrderRepository(ABC):
     ) -> List[Order]:
         """종목별 주문 내역 조회 (기간 지정)."""
         pass
+    @abstractmethod
+    async def get_orders_by_date_range(
+        self, account_number: str, start_date: datetime, end_date: datetime
+    ) -> List[Order]:
+        """계좌의 주문 내역 조회 (기간 지정)."""
+        pass
+
 
 
 class SQLiteOrderRepository(OrderRepository):
@@ -150,6 +157,34 @@ class SQLiteOrderRepository(OrderRepository):
             ORDER BY created_at DESC
             """,
             (stock_code, start_date.isoformat(), end_date.isoformat()),
+        )
+        rows = await cursor.fetchall()
+
+        return [self._row_to_order(row) for row in rows]
+
+
+    async def get_orders_by_date_range(
+        self, account_number: str, start_date: datetime, end_date: datetime
+    ) -> List[Order]:
+        """계좌의 주문 내역 조회 (기간 지정).
+
+        Args:
+            account_number: 계좌번호.
+            start_date: 시작 날짜.
+            end_date: 종료 날짜.
+
+        Returns:
+            주문 목록.
+        """
+        cursor = await self.connection.execute(
+            """
+            SELECT * FROM orders
+            WHERE account_number = ?
+            AND created_at >= ?
+            AND created_at <= ?
+            ORDER BY created_at DESC
+            """,
+            (account_number, start_date.isoformat(), end_date.isoformat()),
         )
         rows = await cursor.fetchall()
 
