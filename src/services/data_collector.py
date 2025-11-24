@@ -318,6 +318,9 @@ class DataCollector:
             stock_codes: 새로운 종목 코드 리스트.
         """
         self.stock_codes = stock_codes
+        # Update StaggeredPricePoller's stock codes as well
+        if self.price_poller:
+            self.price_poller.stock_codes = stock_codes
         logger.info(f"Updated stock codes: {len(stock_codes)} stocks")
 
     async def get_chart_data(

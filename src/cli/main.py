@@ -178,6 +178,20 @@ class TradingSystem:
             f"Loaded {len(self.strategy_engine.strategies)} strategies"
         )
 
+        # Collect all stock codes from strategies and register them to DataCollector
+        all_stock_codes = set()
+        for strategy_name, config in self.strategy_engine.strategy_configs.items():
+            all_stock_codes.update(config.symbols)
+
+        if all_stock_codes:
+            # Merge with existing stock codes and update DataCollector
+            existing_codes = set(self.data_collector.stock_codes)
+            all_stock_codes.update(existing_codes)
+            self.data_collector.update_stock_codes(list(all_stock_codes))
+            logger.info(
+                f"Registered {len(all_stock_codes)} stock codes from strategies: {sorted(all_stock_codes)}"
+            )
+
     async def _start_background_tasks(self) -> None:
         """Start all background service tasks."""
         if self.data_collector:

@@ -34,13 +34,15 @@ class StrategyConfig(BaseModel):
         strategy_name: 전략 고유 이름
         enabled: 전략 활성화 여부
         class_path: 전략 클래스 경로 (예: "src.strategies.golden_cross.GoldenCrossStrategy")
+        symbols: 전략이 감시할 종목 코드 리스트
         parameters: 전략별 파라미터
     """
 
     strategy_name: str = Field(..., min_length=1, max_length=100)
     enabled: bool = Field(default=True)
     class_path: str = Field(..., description="Strategy class path")
-    parameters: Dict[str, any] = Field(default_factory=dict)
+    symbols: List[str] = Field(default_factory=list, description="Stock codes to watch")
+    parameters: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         """Pydantic 설정."""
