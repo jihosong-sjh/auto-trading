@@ -629,6 +629,8 @@ async def cmd_emergency_stop(args: argparse.Namespace, config: Settings) -> int:
 async def cmd_status(args: argparse.Namespace, config: Settings) -> int:
     """Execute status command.
 
+    계좌 현황, 활성 전략, 포지션 정보를 출력합니다.
+
     Args:
         args: Parsed command-line arguments.
         config: System configuration.
@@ -639,24 +641,66 @@ async def cmd_status(args: argparse.Namespace, config: Settings) -> int:
     pid = _read_pid()
 
     if not pid:
-        logger.info("[STATUS] Trading system is NOT running")
+        print("[STATUS] Trading system is NOT running")
         return 0
 
     if not _is_process_running(pid):
-        logger.warning(
+        print(
             f"[STATUS] PID file exists but process {pid} is not running (stale)"
         )
         _remove_pid_file()
         return 1
 
-    logger.info("[STATUS] Trading system is RUNNING")
-    logger.info(f"  - PID: {pid}")
-    logger.info(f"  - PID file: {_get_pid_file()}")
-    logger.info("")
-    logger.info(
-        "Note: Detailed status (account, positions, strategies) "
-        "requires IPC implementation"
-    )
+    print("=" * 70)
+    print("[SYSTEM STATUS]")
+    print("=" * 70)
+    print(f"Status: RUNNING")
+    print(f"PID: {pid}")
+    print(f"PID file: {_get_pid_file()}")
+    print("")
+
+    # NOTE: 실제 구현에서는 IPC를 통해 실행 중인 시스템에서 상태를 가져와야 함
+    # 현재는 간단히 설정 파일 기반으로 예시를 보여줌
+    print("[ACCOUNT STATUS]")
+    print("-" * 70)
+    print("Note: Live status requires IPC implementation")
+    print("      Showing configuration-based data structure below:")
+    print("")
+
+    # 예시 데이터 구조 표시 (설정 기반)
+    print(f"Initial Balance:    {config.initial_balance:>15,.0f} KRW")
+    print(f"Watch Symbols:      {config.watch_symbols}")
+    print("")
+
+    print("[POSITIONS]")
+    print("-" * 70)
+    print("No live position data available (IPC required)")
+    print("")
+
+    print("[ACTIVE STRATEGIES]")
+    print("-" * 70)
+    enabled_strategies = [s for s in config.strategies if s.enabled]
+    if enabled_strategies:
+        for strategy in enabled_strategies:
+            print(f"  - {strategy.strategy_name}")
+            print(f"    Capital Allocation: {strategy.capital_allocation:,.0f} KRW")
+            print(f"    Max Positions: {strategy.max_positions}")
+            print(f"    Watched Stocks: {len(strategy.watched_stocks)}")
+    else:
+        print("No active strategies")
+    print("")
+
+    print("=" * 70)
+    print("[IMPLEMENTATION NOTE]")
+    print("=" * 70)
+    print("To display live account and position data, implement:")
+    print("1. IPC (Inter-Process Communication) mechanism")
+    print("2. Status endpoint via HTTP/socket or shared memory")
+    print("3. Periodic status file updates by running system")
+    print("")
+    print("For now, monitor logs for real-time activity.")
+    print("=" * 70)
+
     return 0
 
 

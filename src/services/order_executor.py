@@ -2,6 +2,7 @@
 
 주문 검증, 제출, 상태 추적을 담당하는 핵심 컴포넌트입니다.
 T086: RiskManager 통합하여 주문 전 위험 검증을 수행합니다.
+T071: 주문 체결 시 계좌 상태 자동 업데이트를 수행합니다.
 """
 
 from datetime import datetime
@@ -15,6 +16,7 @@ from ..models.order import Order
 from ..models.position import Position
 from ..models.stock import Stock
 from ..utils.logger import get_logger
+from .account_service import AccountService
 from .duplicate_checker import DuplicateOrderChecker
 from .order_validator import OrderValidator
 from .risk_manager import RiskManager
@@ -71,7 +73,8 @@ class OrderExecutor:
         client: KiwoomClientProtocol,
         pending_orders: Dict[str, Order],
         positions: Dict[str, Position],
-        risk_manager: Optional[RiskManager] = None
+        risk_manager: Optional[RiskManager] = None,
+        account_service: Optional[AccountService] = None
     ):
         """OrderExecutor를 초기화합니다.
 
@@ -80,6 +83,7 @@ class OrderExecutor:
             pending_orders: 진행 중인 주문 딕셔너리 (order_id -> Order)
             positions: 현재 포지션 딕셔너리 (stock_code -> Position)
             risk_manager: 위험 관리자 (T086). None이면 기본 설정으로 생성.
+            account_service: 계좌 서비스 (T071). None이면 자동 생성.
         """
         self.client = client
         self.pending_orders = pending_orders
@@ -93,6 +97,9 @@ class OrderExecutor:
             max_position_concentration=Decimal("0.3"),  # 기본값: 30%
             warning_threshold=Decimal("0.8")  # 기본값: 80%
         )
+        
+        # T071: AccountService 통합 (주문 체결 시 계좌 자동 업데이트)
+        self.account_service = account_service or AccountService(provider=client)
 
     async def execute_order(self, order: Order) -> tuple[bool, Optional[str], Optional[Order]]:
         """주문을 검증하고 실행합니다.
@@ -195,6 +202,10 @@ class OrderExecutor:
                     f"주문 체결 완료: {filled_order.order_id} - "
                     f"{filled_order.filled_quantity}주 @ {filled_order.filled_price:,}원"
                 )
+                
+                # T071: 주문 체결 시 계좌 상태 자동 업데이트
+                await self._update_account_on_fill(filled_order)
+                
                 # 진행 중인 주문에서 제거
                 self.pending_orders.pop(filled_order.order_id, None)
                 return True, None, filled_order
@@ -296,3 +307,48 @@ class OrderExecutor:
             order for order in self.pending_orders.values()
             if order.stock_code == stock_code
         ]
+
+    async def _update_account_on_fill(self, filled_order: Order) -> None:
+        """주문 체결 시 계좌 상태를 자동으로 업데이트합니다 (T071).
+
+        Args:
+            filled_order: 체결된 주문.
+        """
+        try:
+            # 계좌 정보 강제 갱신
+            await self.account_service.refresh_account()
+            
+            # 매매 손익 계산 (매도 주문인 경우만)
+            if filled_order.order_type == OrderType.SELL:
+                # 포지션 정보에서 평균 매수가 가져오기
+                position = self.positions.get(filled_order.stock_code)
+                if position:
+                    # 실현 손익 = (매도가 - 평균 매수가) * 체결 수량
+                    realized_pnl = (
+                        (filled_order.filled_price - position.average_buy_price) 
+                        * filled_order.filled_quantity
+                    )
+                    
+                    # 계좌의 당일 손익에 반영
+                    await self.account_service.update_daily_pnl(realized_pnl)
+                    
+                    logger.info(
+                        f"[T071] 매도 체결 후 계좌 업데이트: "
+                        f"실현 손익 {realized_pnl:+,.0f}원"
+                    )
+            
+            # 계좌 정보 로깅
+            account = await self.account_service.get_account()
+            logger.info(
+                f"[T071] 계좌 상태 업데이트 완료: "
+                f"예수금={account.cash_balance:,.0f}원, "
+                f"총 평가액={account.total_asset_value:,.0f}원, "
+                f"당일 손익={account.daily_pnl:+,.0f}원"
+            )
+            
+        except Exception as e:
+            logger.error(
+                f"[T071] 계좌 업데이트 중 오류 발생: {e}",
+                exc_info=True
+            )
+            # 계좌 업데이트 실패는 주문 체결에는 영향을 주지 않음

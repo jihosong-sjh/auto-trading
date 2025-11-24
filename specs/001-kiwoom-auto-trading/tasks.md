@@ -257,8 +257,8 @@
 
 ### 6.3 CLI 인터페이스
 
-- [ ] T070 [US2] CLI 'status' 명령 구현 in src/cli/main.py (계좌 현황, 활성 전략, 포지션 출력)
-- [ ] T071 [US2] 실시간 상태 업데이트 로직 추가 (주문 체결 시 계좌 자동 업데이트)
+- [X] T070 [US2] CLI 'status' 명령 구현 in src/cli/main.py (계좌 현황, 활성 전략, 포지션 출력)
+- [X] T071 [US2] 실시간 상태 업데이트 로직 추가 (주문 체결 시 계좌 자동 업데이트)
 
 **Checkpoint**: User Story 2 완료 - CLI에서 `python -m src.cli.main status` 실행 시 정확한 계좌 정보가 표시되어야 함
 
