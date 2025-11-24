@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 
 from ..config.settings import Settings
 from ..models import SystemMode
+from ..models.order import Order
+from ..models.position import Position
 from ..models.stock import Stock
 from ..models.system_status import SystemStatus
 from ..services.data_collector import DataCollector
@@ -61,6 +63,10 @@ class TradingSystem:
         self.strategy_engine: Optional[StrategyEngine] = None
         self.order_executor: Optional[OrderExecutor] = None
 
+        # Shared state for services
+        self.pending_orders: Dict[str, Order] = {}
+        self.positions: Dict[str, Position] = {}
+
         # Background tasks
         self.tasks: list[asyncio.Task] = []
 
@@ -69,27 +75,19 @@ class TradingSystem:
 
     def _setup_signal_handlers(self) -> None:
         """Setup signal handlers for graceful shutdown."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # Not in async context yet, will setup later
-            return
-
+        # Use standard signal.signal() for cross-platform compatibility
+        # add_signal_handler() is not supported on Windows
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(
-                sig,
-                lambda s=sig: asyncio.create_task(
-                    self._handle_signal(s)
-                )
-            )
+            signal.signal(sig, self._signal_handler)
 
-    async def _handle_signal(self, sig: signal.Signals) -> None:
-        """Handle shutdown signals.
+    def _signal_handler(self, signum: int, frame) -> None:
+        """Handle shutdown signals (sync wrapper).
 
         Args:
-            sig: Signal received.
+            signum: Signal number.
+            frame: Current stack frame.
         """
-        logger.info(f"Received signal {sig.name}, initiating shutdown...")
+        logger.info(f"Received signal {signum}, initiating shutdown...")
         self.shutdown_event.set()
 
     async def start(self, mode: str = "simulator") -> None:
@@ -159,20 +157,23 @@ class TradingSystem:
         )
 
         self.strategy_engine = StrategyEngine(
-            config=self.config,
-            client=client,
+            config_path=None,  # Uses default path: config/strategies.yaml
             market_data_queue=self.market_data_queue,
-            order_queue=self.order_queue
+            risk_manager=None,  # Uses default RiskManager
+            account=None,  # Will be updated when account info is fetched
+            positions=None  # Will be updated when positions are fetched
         )
 
         self.order_executor = OrderExecutor(
-            config=self.config,
             client=client,
-            order_queue=self.order_queue
+            pending_orders=self.pending_orders,
+            positions=self.positions,
+            risk_manager=None,  # Uses default RiskManager
+            account_service=None  # Will be set up later if needed
         )
 
         # Load strategies
-        await self.strategy_engine.load_strategies()
+        self.strategy_engine.load_and_initialize_strategies()
         logger.info(
             f"Loaded {len(self.strategy_engine.strategies)} strategies"
         )
@@ -193,12 +194,8 @@ class TradingSystem:
             )
             self.tasks.append(task)
 
-        if self.order_executor:
-            task = asyncio.create_task(
-                self.order_executor.run(),
-                name="order_executor"
-            )
-            self.tasks.append(task)
+        # Note: OrderExecutor is not a background task service
+        # It's called on-demand when orders need to be executed
 
         logger.info(f"Started {len(self.tasks)} background tasks")
 
@@ -226,9 +223,10 @@ class TradingSystem:
                     "Some tasks did not complete within timeout"
                 )
 
-        # Close order executor (saves pending orders)
+        # OrderExecutor cleanup (if needed)
+        # Note: OrderExecutor doesn't have a close() method currently
         if self.order_executor:
-            await self.order_executor.close()
+            logger.debug("OrderExecutor cleanup - no action needed")
 
         # Clear queues
         while not self.market_data_queue.empty():
