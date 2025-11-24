@@ -251,9 +251,9 @@
 
 ### 6.2 테스트 (Simulator 기반)
 
-- [ ] T067 [P] [US2] AccountService 단위 테스트 in tests/unit/test_account_service.py
-- [ ] T068 [P] [US2] PositionService 단위 테스트 in tests/unit/test_position_service.py
-- [ ] T069 [US2] 계좌 상태 조회 통합 테스트 in tests/integration/test_account_status.py
+- [X] T067 [P] [US2] AccountService 단위 테스트 in tests/unit/test_account_service.py
+- [X] T068 [P] [US2] PositionService 단위 테스트 in tests/unit/test_position_service.py
+- [X] T069 [US2] 계좌 상태 조회 통합 테스트 in tests/integration/test_account_status.py
 
 ### 6.3 CLI 인터페이스
 
