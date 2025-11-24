@@ -69,9 +69,11 @@ class ChartInterval(str, Enum):
 
     Attributes:
         TICK: 체결 데이터.
-        MIN_1: 1분봉.
-        MIN_5: 5분봉.
-        MIN_30: 30분봉.
+        MINUTE_1: 1분봉.
+        MINUTE_5: 5분봉.
+        MINUTE_10: 10분봉.
+        MINUTE_30: 30분봉.
+        MINUTE_60: 60분봉.
         HOUR_1: 1시간봉.
         DAY: 일봉.
         WEEK: 주봉.
@@ -79,9 +81,11 @@ class ChartInterval(str, Enum):
     """
 
     TICK = "TICK"
-    MIN_1 = "MIN_1"
-    MIN_5 = "MIN_5"
-    MIN_30 = "MIN_30"
+    MINUTE_1 = "MIN_1"
+    MINUTE_5 = "MIN_5"
+    MINUTE_10 = "MIN_10"
+    MINUTE_30 = "MIN_30"
+    MINUTE_60 = "MIN_60"
     HOUR_1 = "HOUR_1"
     DAY = "DAY"
     WEEK = "WEEK"
