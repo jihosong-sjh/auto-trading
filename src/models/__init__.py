@@ -159,6 +159,7 @@ from .chart_data import ChartData
 from .notification import Notification
 from .system_status import SystemStatus
 from .strategy import BaseStrategy
+from .order_book import OrderBook, OrderBookLevel
 
 __all__ = [
     # Enums
@@ -179,4 +180,6 @@ __all__ = [
     "Notification",
     "SystemStatus",
     "BaseStrategy",
+    "OrderBook",
+    "OrderBookLevel",
 ]
