@@ -90,6 +90,12 @@ class Settings(BaseSettings):
         default=None, description="계좌번호 (8자리)"
     )
 
+    # Rate Limiting 설정 (키움증권 서버 제한 준수)
+    kiwoom_rate_limit_per_second: Optional[int] = Field(
+        default=None,
+        description="초당 최대 요청 수 (미지정 시 trading_mode에 따라 자동 설정: 모의 1, 실전 5)"
+    )
+
     # 시뮬레이터 설정
     initial_balance: Decimal = Field(
         default=Decimal("10000000"), description="초기 예수금 (시뮬레이터용)"
@@ -148,6 +154,24 @@ class Settings(BaseSettings):
             return "https://api.kiwoom.com"
         else:  # virtual (default)
             return "https://mockapi.kiwoom.com"
+
+    def get_rate_limit_per_second(self) -> int:
+        """투자 구분에 따른 초당 최대 요청 수 반환.
+
+        Returns:
+            초당 최대 요청 수.
+            - 모의투자: 1 request/second (키움증권 서버 제한)
+            - 실전투자: 5 requests/second (키움증권 서버 제한)
+            - 사용자 지정값이 있으면 해당 값 사용
+        """
+        if self.kiwoom_rate_limit_per_second is not None:
+            return self.kiwoom_rate_limit_per_second
+
+        # trading_mode에 따라 자동 설정
+        if self.kiwoom_trading_mode == "real":
+            return 5  # 실전투자: 초당 5건
+        else:  # virtual (default)
+            return 1  # 모의투자: 초당 1건
 
     def is_production_mode(self) -> bool:
         """프로덕션 모드 여부 확인.

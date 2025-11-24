@@ -141,9 +141,15 @@ class TradingSystem:
             from ..api.kiwoom_client import KiwoomClient
             client = KiwoomClient(
                 api_key=self.config.kiwoom_api_key,
-                api_secret=self.config.kiwoom_api_secret
+                api_secret=self.config.kiwoom_api_secret,
+                account_number=self.config.kiwoom_account_number,
+                base_url=self.config.get_kiwoom_api_url(),
+                max_requests_per_second=self.config.get_rate_limit_per_second()
             )
-            logger.info("Initialized live Kiwoom API client")
+            logger.info(
+                f"Initialized live Kiwoom API client with rate limit: "
+                f"{self.config.get_rate_limit_per_second()} req/s"
+            )
 
         # Initialize services
         self.data_collector = DataCollector(
@@ -774,9 +780,15 @@ async def cmd_test_api(args: argparse.Namespace, config: Settings) -> int:
                 api_key=config.kiwoom_api_key,
                 api_secret=config.kiwoom_api_secret,
                 account_number=config.kiwoom_account_number,
-                base_url=config.get_kiwoom_api_url()
+                base_url=config.get_kiwoom_api_url(),
+                max_requests_per_second=config.get_rate_limit_per_second()
             ) as client:
-                logger.info(f"[SUCCESS] API client initialized successfully (mode: {config.kiwoom_trading_mode}, url: {config.get_kiwoom_api_url()})")
+                logger.info(
+                    f"[SUCCESS] API client initialized successfully "
+                    f"(mode: {config.kiwoom_trading_mode}, "
+                    f"url: {config.get_kiwoom_api_url()}, "
+                    f"rate limit: {config.get_rate_limit_per_second()} req/s)"
+                )
 
                 # Test basic operations
                 account = await client.get_account()
