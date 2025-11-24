@@ -1,0 +1,28 @@
+# Prometheus Configuration
+# Phase 7: Performance Monitoring
+
+global:
+  scrape_interval: 15s  # 기본 스크랩 간격
+  evaluation_interval: 15s  # 규칙 평가 간격
+
+# Alertmanager 설정 (옵션)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - 'alertmanager:9093'
+
+# 스크랩 설정
+scrape_configs:
+  # Auto-trading 메트릭 수집
+  - job_name: 'auto-trading'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+        labels:
+          app: 'auto-trading'
+          environment: 'production'
+
+  # Prometheus 자체 모니터링
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9091']
