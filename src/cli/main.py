@@ -31,6 +31,14 @@ try:
 except ImportError:
     TIMESCALEDB_AVAILABLE = False
 
+# Prometheus 모니터링 관련 임포트
+try:
+    from ..monitoring.metrics_collector import MetricsCollector
+    from ..monitoring.prometheus_exporter import PrometheusExporter
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    PROMETHEUS_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 
@@ -82,6 +90,10 @@ class TradingSystem:
         # TimescaleDB 관련
         self.tsdb: Optional[TimeSeriesDB] = None
         self.ts_log_handler: Optional[AsyncTimescaleLogHandler] = None
+
+        # Prometheus 모니터링 관련
+        self.metrics_collector: Optional[MetricsCollector] = None
+        self.prometheus_exporter: Optional[PrometheusExporter] = None
 
         # Background tasks
         self.tasks: list[asyncio.Task] = []
@@ -184,6 +196,30 @@ class TradingSystem:
             logger.warning(
                 "TimescaleDB is enabled in config but required dependencies "
                 "(asyncpg, pandas) are not installed. Skipping TimescaleDB setup."
+            )
+
+        # Prometheus 모니터링 초기화 (활성화된 경우)
+        if self.config.enable_prometheus and PROMETHEUS_AVAILABLE:
+            try:
+                self.metrics_collector = MetricsCollector()
+                self.prometheus_exporter = PrometheusExporter(
+                    metrics_collector=self.metrics_collector,
+                    host=self.config.prometheus_host,
+                    port=self.config.prometheus_port,
+                )
+                logger.info(
+                    f"Prometheus monitoring initialized "
+                    f"(endpoint=http://{self.config.prometheus_host}:{self.config.prometheus_port}/metrics)"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize Prometheus monitoring: {e}", exc_info=True)
+                logger.warning("Continuing without Prometheus monitoring")
+                self.metrics_collector = None
+                self.prometheus_exporter = None
+        elif self.config.enable_prometheus and not PROMETHEUS_AVAILABLE:
+            logger.warning(
+                "Prometheus is enabled in config but required dependencies "
+                "(prometheus_client, aiohttp) are not installed. Skipping Prometheus setup."
             )
 
         # Create appropriate client based on mode
@@ -310,6 +346,19 @@ class TradingSystem:
             )
             self.tasks.append(task)
 
+        # Prometheus exporter 시작 및 메트릭 수집 태스크
+        if self.prometheus_exporter:
+            await self.prometheus_exporter.start()
+            logger.info("Prometheus exporter started")
+
+            # 시스템 메트릭 수집 루프 시작
+            task = asyncio.create_task(
+                self._metrics_collection_loop(),
+                name="metrics_collection"
+            )
+            self.tasks.append(task)
+            logger.info("System metrics collection task started")
+
         # Note: OrderExecutor is not a background task service
         # It's called on-demand when orders need to be executed
 
@@ -327,6 +376,42 @@ class TradingSystem:
             if self.ts_log_handler:
                 await self.ts_log_handler._flush_buffer()
             raise
+
+    async def _metrics_collection_loop(self) -> None:
+        """주기적으로 시스템 메트릭 수집."""
+        try:
+            while not self.shutdown_event.is_set():
+                await asyncio.sleep(self.config.metrics_collection_interval)
+
+                if self.metrics_collector:
+                    # 시스템 메트릭 수집 (CPU, Memory, Disk)
+                    await self.metrics_collector.collect_system_metrics()
+
+                    # 파이프라인 메트릭 업데이트
+                    if self.order_executor:
+                        self.metrics_collector.set_pipeline_queue_depth(
+                            len(self.pending_orders)
+                        )
+
+                    # 포지션 집중도 메트릭 업데이트
+                    if self.positions:
+                        total_value = sum(
+                            p.current_value for p in self.positions.values()
+                            if hasattr(p, 'current_value')
+                        )
+                        if total_value > 0:
+                            for code, position in self.positions.items():
+                                if hasattr(position, 'current_value'):
+                                    ratio = float(position.current_value / total_value)
+                                    self.metrics_collector.set_position_concentration(
+                                        code, ratio
+                                    )
+
+        except asyncio.CancelledError:
+            logger.debug("Metrics collection loop cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in metrics collection loop: {e}", exc_info=True)
 
     async def shutdown(self) -> None:
         """Gracefully shutdown the trading system."""
@@ -384,6 +469,12 @@ class TradingSystem:
                 self.order_queue.task_done()
             except asyncio.QueueEmpty:
                 break
+
+        # Prometheus exporter 종료
+        if self.prometheus_exporter:
+            logger.info("Stopping Prometheus exporter...")
+            await self.prometheus_exporter.stop()
+            logger.info("Prometheus exporter stopped")
 
         # TimescaleDB 정리
         if self.ts_log_handler:

@@ -107,10 +107,12 @@ class PrometheusExporter:
             # 메트릭 수집
             metrics_data = self.metrics_collector.export_metrics()
 
-            # Prometheus 텍스트 형식으로 응답
+            # Prometheus 텍스트 형식으로 응답 (aiohttp 호환)
             return web.Response(
                 body=metrics_data,
-                content_type="text/plain; version=0.0.4; charset=utf-8",
+                content_type="text/plain",
+                charset="utf-8",
+                headers={"X-Content-Type-Options": "nosniff"},
             )
 
         except Exception as e:

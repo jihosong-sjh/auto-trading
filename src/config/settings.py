@@ -189,6 +189,20 @@ class Settings(BaseSettings):
         default=20, description="TimescaleDB 최대 연결 풀 크기"
     )
 
+    # Prometheus 모니터링 설정
+    enable_prometheus: bool = Field(
+        default=False, description="Prometheus 메트릭 수집 활성화 여부"
+    )
+    prometheus_port: int = Field(
+        default=9090, description="Prometheus exporter HTTP 포트"
+    )
+    prometheus_host: str = Field(
+        default="0.0.0.0", description="Prometheus exporter 바인딩 호스트"
+    )
+    metrics_collection_interval: float = Field(
+        default=10.0, description="시스템 메트릭 수집 간격 (초)"
+    )
+
     # 데이터 수집 설정
     data_polling_interval: float = Field(
         default=1.0,
