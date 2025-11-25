@@ -17,11 +17,17 @@ from decimal import Decimal
 import yaml
 from pydantic import BaseModel, Field
 
-from ..models import Stock
+from ..models import Stock, PriceType, OrderType
 from ..models.strategy import BaseStrategy
 from ..models.account import Account
 from ..models.position import Position
+from ..models.order import Order
 from .risk_manager import RiskManager
+
+# Forward declaration for type hints
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .order_executor import OrderExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +42,8 @@ class StrategyConfig(BaseModel):
         class_path: 전략 클래스 경로 (예: "src.strategies.golden_cross.GoldenCrossStrategy")
         symbols: 전략이 감시할 종목 코드 리스트
         parameters: 전략별 파라미터
+        price_type: 주문 가격 타입 (MARKET/LIMIT, 기본값: MARKET)
+        position_size_pct: 가용 자금 대비 포지션 크기 비율 (0.0~1.0, 기본값: 1.0)
     """
 
     strategy_name: str = Field(..., min_length=1, max_length=100)
@@ -43,6 +51,13 @@ class StrategyConfig(BaseModel):
     class_path: str = Field(..., description="Strategy class path")
     symbols: List[str] = Field(default_factory=list, description="Stock codes to watch")
     parameters: Dict[str, Any] = Field(default_factory=dict)
+    price_type: PriceType = Field(default=PriceType.MARKET, description="Order price type")
+    position_size_pct: Decimal = Field(
+        default=Decimal("1.0"),
+        ge=Decimal("0.01"),
+        le=Decimal("1.0"),
+        description="Position size as percentage of available capital"
+    )
 
     class Config:
         """Pydantic 설정."""
@@ -71,7 +86,8 @@ class StrategyEngine:
         market_data_queue: Optional[asyncio.Queue] = None,
         risk_manager: Optional[RiskManager] = None,
         account: Optional[Account] = None,
-        positions: Optional[Dict[str, Position]] = None
+        positions: Optional[Dict[str, Position]] = None,
+        order_executor: Optional["OrderExecutor"] = None
     ):
         """전략 엔진 초기화.
 
@@ -81,6 +97,7 @@ class StrategyEngine:
             risk_manager: 위험 관리자 (T087). None이면 기본 설정으로 생성.
             account: 현재 계좌 정보 (T087).
             positions: 현재 포지션 딕셔너리 (T087).
+            order_executor: 주문 실행기. None이면 주문 실행 기능 비활성화.
         """
         self.config_path = config_path or Path("config/strategies.yaml")
         self.strategies: Dict[str, BaseStrategy] = {}
@@ -90,7 +107,7 @@ class StrategyEngine:
         self.market_data_queue = market_data_queue
         self.running = False
         self.consumer_task: Optional[asyncio.Task] = None
-        
+
         # T087: RiskManager 통합
         self.risk_manager = risk_manager or RiskManager(
             daily_loss_limit_pct=Decimal("0.02"),  # 기본값: 2%
@@ -99,6 +116,9 @@ class StrategyEngine:
         )
         self.account = account
         self.positions = positions or {}
+
+        # 주문 실행기
+        self.order_executor = order_executor
 
     def load_strategies_from_yaml(self) -> List[StrategyConfig]:
         """YAML 파일에서 전략 설정 로드.
@@ -468,8 +488,86 @@ class StrategyEngine:
                         f"[{strategy_name}] BUY signal for {stock.stock_code} "
                         f"at {stock.current_price}"
                     )
-                    # TODO: 실제 주문 실행 로직 (OrderExecutor 호출)
-                    # OrderExecutor가 다시 한 번 위험 검증을 수행합니다 (T086)
+
+                    # 주문 실행 로직 (OrderExecutor 호출)
+                    if self.order_executor is None:
+                        logger.warning(
+                            f"[{strategy_name}] OrderExecutor not configured, skipping order execution"
+                        )
+                        continue
+
+                    try:
+                        # 1. 계좌 정보 조회
+                        account = await self.order_executor.client.get_account()
+
+                        # 2. 전략 설정에서 포지션 크기 비율 가져오기
+                        config = self.strategy_configs[strategy_name]
+                        position_size_pct = config.position_size_pct
+
+                        # 3. 가용 자금 계산 (예수금 * 비율)
+                        available_capital = account.cash_balance * position_size_pct
+
+                        logger.debug(
+                            f"[{strategy_name}] Position sizing: "
+                            f"cash={account.cash_balance:,.0f} * {position_size_pct} = "
+                            f"{available_capital:,.0f} KRW"
+                        )
+
+                        # 4. 포지션 크기(수량) 계산
+                        quantity = await strategy.calculate_position_size(stock, available_capital)
+
+                        if quantity <= 0:
+                            logger.info(
+                                f"[{strategy_name}] Position size is 0, skipping order"
+                            )
+                            continue
+
+                        # 5. 주문 가격 설정
+                        limit_price = None
+                        if config.price_type == PriceType.LIMIT:
+                            limit_price = stock.current_price
+
+                        # 6. Order 객체 생성
+                        order = Order(
+                            account_number=account.account_number,
+                            stock_code=stock.stock_code,
+                            order_type=OrderType.BUY,
+                            price_type=config.price_type,
+                            quantity=quantity,
+                            limit_price=limit_price,
+                            strategy_name=strategy_name
+                        )
+
+                        logger.info(
+                            f"[{strategy_name}] Creating order: "
+                            f"{order.order_type.value} {order.stock_code} "
+                            f"{order.quantity}주 @ {config.price_type.value} "
+                            f"(ID: {order.order_id})"
+                        )
+
+                        # 7. 주문 실행 (OrderExecutor가 다시 한 번 위험 검증 수행 - T086)
+                        success, error_msg, filled_order = await self.order_executor.execute_order(order)
+
+                        if success:
+                            logger.info(
+                                f"[{strategy_name}] Order executed successfully: {order.order_id}"
+                            )
+                            if filled_order:
+                                logger.info(
+                                    f"[{strategy_name}] Filled: {filled_order.filled_quantity}주 "
+                                    f"@ {filled_order.filled_price:,.0f}원 "
+                                    f"(Status: {filled_order.status.value})"
+                                )
+                        else:
+                            logger.error(
+                                f"[{strategy_name}] Order execution failed: {error_msg}"
+                            )
+
+                    except Exception as e:
+                        logger.error(
+                            f"[{strategy_name}] Error creating/executing order for {stock.stock_code}: {e}",
+                            exc_info=True
+                        )
 
                 # 매도 시그널 평가
                 # TODO: 현재 포지션이 있는지 확인 필요

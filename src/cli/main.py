@@ -216,20 +216,23 @@ class TradingSystem:
             market_data_queue=self.market_data_queue
         )
 
-        self.strategy_engine = StrategyEngine(
-            config_path=None,  # Uses default path: config/strategies.yaml
-            market_data_queue=self.market_data_queue,
-            risk_manager=None,  # Uses default RiskManager
-            account=None,  # Will be updated when account info is fetched
-            positions=None  # Will be updated when positions are fetched
-        )
-
+        # Initialize OrderExecutor first (StrategyEngine will need it)
         self.order_executor = OrderExecutor(
             client=client,
             pending_orders=self.pending_orders,
             positions=self.positions,
             risk_manager=None,  # Uses default RiskManager
             account_service=None  # Will be set up later if needed
+        )
+
+        # Initialize StrategyEngine with OrderExecutor
+        self.strategy_engine = StrategyEngine(
+            config_path=None,  # Uses default path: config/strategies.yaml
+            market_data_queue=self.market_data_queue,
+            risk_manager=None,  # Uses default RiskManager
+            account=None,  # Will be updated when account info is fetched
+            positions=self.positions,  # Share positions with OrderExecutor
+            order_executor=self.order_executor  # Enable order execution
         )
 
         # Load strategies
