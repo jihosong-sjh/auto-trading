@@ -34,3 +34,7 @@ pyyaml>=6.0  # YAML 파일 파싱
 # Redis caching layer
 redis>=5.0.0  # Redis 클라이언트
 hiredis>=2.2.0  # Redis 성능 향상을 위한 C 파서
+
+# Dashboard (web UI)
+fastapi>=0.104.0  # FastAPI 웹 프레임워크
+uvicorn>=0.24.0  # ASGI 서버

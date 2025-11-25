@@ -113,6 +113,10 @@ class OrderExecutor:
         self._running = False
         self._consumer_task: Optional[asyncio.Task] = None
 
+        # T-DASH-006: Dashboard 데이터 발행용 callback
+        # TradingSystem에서 DashboardDataPublisher.publish_trade()를 연결
+        self.on_trade_filled_callback: Optional[callable] = None
+
     async def execute_order(self, order: Order) -> tuple[bool, Optional[str], Optional[Order]]:
         """주문을 검증하고 실행합니다.
 
@@ -215,10 +219,17 @@ class OrderExecutor:
                     f"주문 체결 완료: {filled_order.order_id} - "
                     f"{filled_order.filled_quantity}주 @ {filled_order.filled_price:,}원"
                 )
-                
+
                 # T071: 주문 체결 시 계좌 상태 자동 업데이트
-                await self._update_account_on_fill(filled_order)
-                
+                realized_pnl = await self._update_account_on_fill(filled_order)
+
+                # T-DASH-006: Dashboard 데이터 발행 callback 호출
+                if self.on_trade_filled_callback:
+                    try:
+                        await self.on_trade_filled_callback(filled_order, realized_pnl)
+                    except Exception as e:
+                        logger.error(f"Trade filled callback error: {e}")
+
                 # 진행 중인 주문에서 제거
                 self.pending_orders.pop(filled_order.order_id, None)
                 return True, None, filled_order
@@ -336,16 +347,21 @@ class OrderExecutor:
             if order.stock_code == stock_code
         ]
 
-    async def _update_account_on_fill(self, filled_order: Order) -> None:
+    async def _update_account_on_fill(self, filled_order: Order) -> Optional[Decimal]:
         """주문 체결 시 계좌 상태를 자동으로 업데이트합니다 (T071).
 
         Args:
             filled_order: 체결된 주문.
+
+        Returns:
+            Optional[Decimal]: 매도 주문의 경우 실현 손익, 매수 주문은 None
         """
+        realized_pnl: Optional[Decimal] = None
+
         try:
             # 계좌 정보 강제 갱신
             await self.account_service.refresh_account()
-            
+
             # 매매 손익 계산 (매도 주문인 경우만)
             if filled_order.order_type == OrderType.SELL:
                 # 포지션 정보에서 평균 매수가 가져오기
@@ -353,18 +369,18 @@ class OrderExecutor:
                 if position:
                     # 실현 손익 = (매도가 - 평균 매수가) * 체결 수량
                     realized_pnl = (
-                        (filled_order.filled_price - position.average_buy_price) 
+                        (filled_order.filled_price - position.average_buy_price)
                         * filled_order.filled_quantity
                     )
-                    
+
                     # 계좌의 당일 손익에 반영
                     await self.account_service.update_daily_pnl(realized_pnl)
-                    
+
                     logger.info(
                         f"[T071] 매도 체결 후 계좌 업데이트: "
                         f"실현 손익 {realized_pnl:+,.0f}원"
                     )
-            
+
             # 계좌 정보 로깅
             account = await self.account_service.get_account()
             logger.info(
@@ -373,13 +389,15 @@ class OrderExecutor:
                 f"총 평가액={account.total_asset_value:,.0f}원, "
                 f"당일 손익={account.daily_pnl:+,.0f}원"
             )
-            
+
         except Exception as e:
             logger.error(
                 f"[T071] 계좌 업데이트 중 오류 발생: {e}",
                 exc_info=True
             )
             # 계좌 업데이트 실패는 주문 체결에는 영향을 주지 않음
+
+        return realized_pnl
 
     async def _update_position_on_partial_fill(self, partially_filled_order: Order) -> None:
         """부분 체결 시 포지션을 업데이트합니다 (Phase 5).

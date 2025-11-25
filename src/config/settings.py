@@ -203,6 +203,24 @@ class Settings(BaseSettings):
         default=10.0, description="시스템 메트릭 수집 간격 (초)"
     )
 
+    # Dashboard 설정 (실시간 포지션/P&L 웹 대시보드)
+    enable_dashboard: bool = Field(
+        default=False, description="Dashboard 데이터 발행 활성화 여부"
+    )
+    dashboard_host: str = Field(
+        default="0.0.0.0", description="Dashboard 서버 바인딩 호스트"
+    )
+    dashboard_port: int = Field(
+        default=8080, description="Dashboard 서버 HTTP 포트"
+    )
+    dashboard_update_interval: float = Field(
+        default=1.0, description="포지션/P&L 업데이트 간격 (초)"
+    )
+    dashboard_cors_origins: List[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://localhost:8080"],
+        description="Dashboard CORS 허용 오리진 목록"
+    )
+
     # 데이터 수집 설정
     data_polling_interval: float = Field(
         default=1.0,

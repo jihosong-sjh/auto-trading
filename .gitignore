@@ -94,3 +94,6 @@ config/*.yml
 # API credentials (should never be committed)
 credentials.json
 secrets/
+
+# Node.js
+node_modules/

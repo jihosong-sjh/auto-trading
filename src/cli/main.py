@@ -46,6 +46,14 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
+# Dashboard 데이터 발행 관련 임포트
+try:
+    from ..cache.redis_manager import RedisManager
+    from ..dashboard.services.data_publisher import DashboardDataPublisher
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 
@@ -103,6 +111,10 @@ class TradingSystem:
         # Prometheus 모니터링 관련
         self.metrics_collector: Optional[MetricsCollector] = None
         self.prometheus_exporter: Optional[PrometheusExporter] = None
+
+        # Dashboard 데이터 발행 관련
+        self.redis_manager: Optional[RedisManager] = None
+        self.dashboard_publisher: Optional[DashboardDataPublisher] = None
 
         # Background tasks
         self.tasks: list[asyncio.Task] = []
@@ -357,6 +369,65 @@ class TradingSystem:
                 f"Registered {len(all_stock_codes)} stock codes from strategies: {sorted(all_stock_codes)}"
             )
 
+        # Dashboard 데이터 발행 초기화 (활성화된 경우)
+        if self.config.enable_dashboard and self.config.redis_enabled and DASHBOARD_AVAILABLE:
+            try:
+                # Redis 연결 초기화
+                self.redis_manager = RedisManager(
+                    host=self.config.redis_host,
+                    port=self.config.redis_port,
+                    db=self.config.redis_db,
+                    password=self.config.redis_password,
+                    max_connections=self.config.redis_max_connections,
+                    default_ttl=self.config.redis_cache_ttl
+                )
+                await self.redis_manager.initialize()
+                logger.info(
+                    f"Connected to Redis at {self.config.redis_host}:{self.config.redis_port} "
+                    f"for dashboard data publishing"
+                )
+
+                # DashboardDataPublisher 초기화
+                self.dashboard_publisher = DashboardDataPublisher(
+                    redis_manager=self.redis_manager,
+                    positions=self.positions,
+                    account=None,  # Account will be updated dynamically
+                    publish_interval=self.config.dashboard_update_interval
+                )
+
+                # OrderExecutor에 trade callback 연결
+                if self.order_executor:
+                    self.order_executor.on_trade_filled_callback = self._on_trade_filled
+
+                logger.info(
+                    f"DashboardDataPublisher initialized "
+                    f"(update_interval={self.config.dashboard_update_interval}s)"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to initialize Dashboard publisher: {e}", exc_info=True)
+                logger.warning("Continuing without Dashboard data publishing")
+                self.redis_manager = None
+                self.dashboard_publisher = None
+        elif self.config.enable_dashboard and not DASHBOARD_AVAILABLE:
+            logger.warning(
+                "Dashboard is enabled in config but required dependencies "
+                "(redis, dashboard module) are not installed. Skipping Dashboard setup."
+            )
+
+    async def _on_trade_filled(self, order: Order, realized_pnl: Optional[Decimal] = None) -> None:
+        """체결 완료 시 Dashboard에 데이터 발행.
+
+        Args:
+            order: 체결된 주문
+            realized_pnl: 실현 손익 (매도 주문의 경우)
+        """
+        if self.dashboard_publisher:
+            try:
+                await self.dashboard_publisher.publish_trade(order, realized_pnl)
+            except Exception as e:
+                logger.error(f"Failed to publish trade to dashboard: {e}")
+
     async def _start_background_tasks(self) -> None:
         """Start all background service tasks."""
         if self.data_collector:
@@ -411,6 +482,11 @@ class TradingSystem:
             )
             self.tasks.append(task)
             logger.info("System metrics collection task started")
+
+        # Dashboard 데이터 발행 시작
+        if self.dashboard_publisher:
+            await self.dashboard_publisher.start()
+            logger.info("DashboardDataPublisher background task started")
 
         # Note: OrderExecutor is not a background task service
         # It's called on-demand when orders need to be executed
@@ -526,6 +602,18 @@ class TradingSystem:
                     break
             if count > 0:
                 logger.debug(f"Cleared {count} items from {queue_name}")
+
+        # Dashboard 데이터 발행 종료
+        if self.dashboard_publisher:
+            logger.info("Stopping DashboardDataPublisher...")
+            await self.dashboard_publisher.stop()
+            logger.info("DashboardDataPublisher stopped")
+
+        # Redis 연결 종료
+        if self.redis_manager:
+            logger.info("Closing Redis connection...")
+            await self.redis_manager.close()
+            logger.info("Redis connection closed")
 
         # Prometheus exporter 종료
         if self.prometheus_exporter:
@@ -667,6 +755,24 @@ def create_parser() -> argparse.ArgumentParser:
         choices=["simulator", "live"],
         default="live",
         help="API mode to test (default: live)",
+    )
+
+    # dashboard command
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Start the web dashboard server",
+    )
+    dashboard_parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Dashboard server host (default: from config)",
+    )
+    dashboard_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Dashboard server port (default: from config)",
     )
 
     # backtest command
@@ -1108,6 +1214,51 @@ async def cmd_test_api(args: argparse.Namespace, config: Settings) -> int:
         return 1
 
 
+async def cmd_dashboard(args: argparse.Namespace, config: Settings) -> int:
+    """Execute dashboard command - start web dashboard server.
+
+    Args:
+        args: Parsed command-line arguments.
+        config: System configuration.
+
+    Returns:
+        Exit code (0 for success).
+    """
+    # Check Redis availability
+    if not config.redis_enabled:
+        logger.error("Redis is required for dashboard. Enable redis_enabled in config.")
+        return 1
+
+    # Override host/port if provided
+    if args.host:
+        config.dashboard_host = args.host
+    if args.port:
+        config.dashboard_port = args.port
+
+    logger.info(f"Starting Dashboard server on {config.dashboard_host}:{config.dashboard_port}")
+    logger.info("Dashboard requires Redis for data sharing with trading system")
+    logger.info("")
+    logger.info("Access the dashboard at:")
+    logger.info(f"  http://localhost:{config.dashboard_port}/")
+    logger.info("")
+    logger.info("For development with React hot reload:")
+    logger.info("  cd dashboard-ui && npm run dev")
+    logger.info(f"  http://localhost:5173/")
+    logger.info("")
+
+    try:
+        from ..dashboard.app import run_dashboard_server
+        await run_dashboard_server(settings=config)
+        return 0
+    except ImportError as e:
+        logger.error(f"Dashboard dependencies not installed: {e}")
+        logger.error("Install with: pip install fastapi uvicorn")
+        return 1
+    except Exception as e:
+        logger.error(f"Dashboard server failed: {e}", exc_info=True)
+        return 1
+
+
 async def cmd_backtest(args: argparse.Namespace, config: Settings) -> int:
     """Execute backtest command.
 
@@ -1314,6 +1465,7 @@ def main() -> int:
         "status": cmd_status,
         "validate-config": cmd_validate_config,
         "test-api": cmd_test_api,
+        "dashboard": cmd_dashboard,
         "backtest": cmd_backtest,
     }
 
