@@ -2,6 +2,7 @@
 
 이 모듈은 매일 15:30 KST에 일일 리포트를 자동으로 생성하고
 설정된 알림 채널로 전송합니다.
+또한 시스템 로그 분석을 수행하여 운영 상태를 요약합니다.
 """
 
 import asyncio
@@ -11,10 +12,12 @@ from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from .report_generator import DailyReportGenerator, DailyReportData
+from .market_close_analyzer import MarketCloseAnalyzer, MarketCloseAnalysisData
 from .notifier import BaseNotifier
 from ..models.notification import Notification, NotificationType
 from ..models.account import Account
 from ..models.position import Position
+from ..config.settings import Settings
 from ..utils.logger import get_logger
 
 KST = ZoneInfo("Asia/Seoul")
@@ -29,13 +32,16 @@ class ScheduledReportSender:
 
     매일 15:30 KST에 일일 거래 리포트를 생성하고
     Discord, Email 등의 알림 채널로 전송합니다.
+    또한 시스템 로그 분석을 수행하여 운영 상태를 요약합니다.
     """
 
     def __init__(
         self,
         report_generator: DailyReportGenerator,
         notifiers: List[BaseNotifier],
-        enabled: bool = True
+        enabled: bool = True,
+        enable_analysis: bool = True,
+        settings: Optional[Settings] = None
     ):
         """ScheduledReportSender 초기화.
 
@@ -43,15 +49,25 @@ class ScheduledReportSender:
             report_generator: 리포트 생성기
             notifiers: 알림 전송기 목록
             enabled: 자동 전송 활성화 여부
+            enable_analysis: 장 마감 분석 활성화 여부
+            settings: 설정 객체 (분석기용)
         """
         self.report_generator = report_generator
         self.notifiers = notifiers
         self.enabled = enabled
+        self.enable_analysis = enable_analysis
+        self._settings = settings
+        self._analyzer: Optional[MarketCloseAnalyzer] = None
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+
+        # 분석 기능 활성화 시 분석기 초기화
+        if enable_analysis:
+            self._analyzer = MarketCloseAnalyzer(settings=settings)
+
         logger.info(
             f"ScheduledReportSender initialized with {len(notifiers)} notifier(s), "
-            f"enabled={enabled}"
+            f"enabled={enabled}, analysis={enable_analysis}"
         )
 
     async def start(self) -> None:
@@ -268,9 +284,9 @@ class ScheduledReportSender:
                     # 15:30 도달
                     pass
 
-                # 리포트 전송
+                # 리포트 및 분석 전송
                 if not self._stop_event.is_set():
-                    logger.info("Market close time (15:30 KST) reached. Sending daily report.")
+                    logger.info("Market close time (15:30 KST) reached. Sending daily report and analysis.")
 
                     # 계좌 및 포지션 정보 가져오기
                     account = await account_provider()
@@ -279,7 +295,101 @@ class ScheduledReportSender:
                     # 리포트 전송
                     await self.send_daily_report_now(account, positions)
 
+                    # 시스템 로그 분석 전송 (활성화된 경우)
+                    if self.enable_analysis and self._analyzer:
+                        await self.send_daily_analysis_now()
+
             except Exception as e:
                 logger.error(f"Error in scheduled daily report: {e}", exc_info=True)
                 # 에러 발생 시 1분 대기 후 재시도
                 await asyncio.sleep(60)
+
+    async def send_daily_analysis_now(
+        self,
+        target_date: Optional[datetime] = None
+    ) -> bool:
+        """시스템 로그 분석을 즉시 실행하고 전송.
+
+        Args:
+            target_date: 분석 대상 날짜 (기본값: 오늘)
+
+        Returns:
+            전송 성공 여부
+        """
+        if not self._analyzer:
+            logger.warning("MarketCloseAnalyzer not initialized. Skipping analysis.")
+            return False
+
+        try:
+            # 로그 분석 실행
+            analysis_data = await self._analyzer.analyze(target_date)
+
+            # 텍스트 형식 생성
+            text_report = self._analyzer.format_analysis_text(analysis_data)
+            discord_metadata = self._analyzer.format_analysis_for_discord(analysis_data)
+
+            # 알림 객체 생성
+            notification = Notification(
+                notification_type=NotificationType.DAILY_REPORT,
+                title=f"System Analysis - {analysis_data.analysis_date.strftime('%Y-%m-%d')}",
+                message=text_report[:1000],  # Discord 메시지 길이 제한
+                metadata=discord_metadata
+            )
+
+            # 모든 알림 채널로 전송
+            success_count = 0
+            for notifier in self.notifiers:
+                if notifier.is_configured():
+                    try:
+                        success = await notifier.send(notification)
+                        if success:
+                            success_count += 1
+                            logger.info(
+                                f"Daily analysis sent successfully via {notifier.__class__.__name__}"
+                            )
+                        else:
+                            logger.warning(
+                                f"Failed to send daily analysis via {notifier.__class__.__name__}"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Error sending daily analysis via {notifier.__class__.__name__}: {e}",
+                            exc_info=True
+                        )
+
+            if success_count > 0:
+                notification.mark_as_sent()
+
+            logger.info(
+                f"Daily analysis sent to {success_count}/{len(self.notifiers)} notifier(s)"
+            )
+
+            return success_count > 0
+
+        except Exception as e:
+            logger.error(f"Error generating or sending daily analysis: {e}", exc_info=True)
+            return False
+
+    async def run_analysis_only(
+        self,
+        target_date: Optional[datetime] = None
+    ) -> Optional[MarketCloseAnalysisData]:
+        """분석만 실행하고 결과를 반환 (알림 전송 없음).
+
+        수동으로 분석 결과만 확인하고 싶을 때 사용합니다.
+
+        Args:
+            target_date: 분석 대상 날짜 (기본값: 오늘)
+
+        Returns:
+            분석 결과 데이터 또는 None (실패 시)
+        """
+        if not self._analyzer:
+            logger.warning("MarketCloseAnalyzer not initialized.")
+            return None
+
+        try:
+            return await self._analyzer.analyze(target_date)
+        except Exception as e:
+            logger.error(f"Error running analysis: {e}", exc_info=True)
+            return None
