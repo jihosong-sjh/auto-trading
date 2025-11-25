@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import signal
 import sys
 from datetime import datetime
@@ -20,6 +21,14 @@ from ..services.data_collector import DataCollector
 from ..services.order_executor import OrderExecutor
 from ..services.strategy_engine import StrategyEngine
 from ..utils.logger import get_logger
+
+# TimescaleDB 관련 임포트
+try:
+    from ..timeseries.database import TimeSeriesDB
+    from ..utils.timescale_log_handler import AsyncTimescaleLogHandler
+    TIMESCALEDB_AVAILABLE = True
+except ImportError:
+    TIMESCALEDB_AVAILABLE = False
 
 logger = get_logger(__name__)
 
@@ -62,10 +71,15 @@ class TradingSystem:
         self.data_collector: Optional[DataCollector] = None
         self.strategy_engine: Optional[StrategyEngine] = None
         self.order_executor: Optional[OrderExecutor] = None
+        self.client = None  # Store client for cleanup
 
         # Shared state for services
         self.pending_orders: Dict[str, Order] = {}
         self.positions: Dict[str, Position] = {}
+
+        # TimescaleDB 관련
+        self.tsdb: Optional[TimeSeriesDB] = None
+        self.ts_log_handler: Optional[AsyncTimescaleLogHandler] = None
 
         # Background tasks
         self.tasks: list[asyncio.Task] = []
@@ -129,6 +143,47 @@ class TradingSystem:
         Args:
             mode: Operational mode ("simulator" or "live").
         """
+        # TimescaleDB 초기화 (활성화된 경우)
+        if self.config.enable_timescaledb and TIMESCALEDB_AVAILABLE:
+            try:
+                self.tsdb = TimeSeriesDB(
+                    host=self.config.timescaledb_host,
+                    port=self.config.timescaledb_port,
+                    database=self.config.timescaledb_database,
+                    user=self.config.timescaledb_user,
+                    password=self.config.timescaledb_password,
+                    min_size=self.config.timescaledb_min_pool_size,
+                    max_size=self.config.timescaledb_max_pool_size
+                )
+                await self.tsdb.connect()
+                logger.info(
+                    f"Connected to TimescaleDB at {self.config.timescaledb_host}:"
+                    f"{self.config.timescaledb_port}/{self.config.timescaledb_database}"
+                )
+
+                # TimescaleDB 로그 핸들러 추가
+                self.ts_log_handler = AsyncTimescaleLogHandler(
+                    db_pool=self.tsdb.pool,
+                    level=getattr(logging, self.config.log_level.upper()),
+                    buffer_size=20  # 더 작은 버퍼로 자주 플러시
+                )
+
+                # 루트 로거에 핸들러 추가
+                root_logger = logging.getLogger()
+                root_logger.addHandler(self.ts_log_handler)
+                logger.info("TimescaleDB log handler attached to root logger")
+
+            except Exception as e:
+                logger.error(f"Failed to initialize TimescaleDB: {e}", exc_info=True)
+                logger.warning("Continuing without TimescaleDB logging")
+                self.tsdb = None
+                self.ts_log_handler = None
+        elif self.config.enable_timescaledb and not TIMESCALEDB_AVAILABLE:
+            logger.warning(
+                "TimescaleDB is enabled in config but required dependencies "
+                "(asyncpg, pandas) are not installed. Skipping TimescaleDB setup."
+            )
+
         # Create appropriate client based on mode
         if mode == "simulator":
             from ..simulator.kiwoom_simulator import KiwoomSimulator
@@ -144,10 +199,15 @@ class TradingSystem:
                 base_url=self.config.get_kiwoom_api_url(),
                 max_requests_per_second=self.config.get_rate_limit_per_second()
             )
+            # Connect to Kiwoom API
+            await client.connect()
             logger.info(
-                f"Initialized live Kiwoom API client with rate limit: "
+                f"Initialized and connected live Kiwoom API client with rate limit: "
                 f"{self.config.get_rate_limit_per_second()} req/s"
             )
+
+        # Store client reference for cleanup
+        self.client = client
 
         # Initialize services
         self.data_collector = DataCollector(
@@ -208,10 +268,31 @@ class TradingSystem:
             )
             self.tasks.append(task)
 
+        # TimescaleDB 로그 플러시 태스크
+        if self.ts_log_handler:
+            task = asyncio.create_task(
+                self._log_flush_loop(),
+                name="timescaledb_log_flush"
+            )
+            self.tasks.append(task)
+
         # Note: OrderExecutor is not a background task service
         # It's called on-demand when orders need to be executed
 
         logger.info(f"Started {len(self.tasks)} background tasks")
+
+    async def _log_flush_loop(self) -> None:
+        """주기적으로 TimescaleDB 로그 플러시."""
+        try:
+            while not self.shutdown_event.is_set():
+                await asyncio.sleep(5.0)  # 5초마다 플러시
+                if self.ts_log_handler and len(self.ts_log_handler.buffer) > 0:
+                    await self.ts_log_handler._flush_buffer()
+        except asyncio.CancelledError:
+            # 마지막 플러시
+            if self.ts_log_handler:
+                await self.ts_log_handler._flush_buffer()
+            raise
 
     async def shutdown(self) -> None:
         """Gracefully shutdown the trading system."""
@@ -242,6 +323,14 @@ class TradingSystem:
         if self.order_executor:
             logger.debug("OrderExecutor cleanup - no action needed")
 
+        # Close API client connection
+        if self.client:
+            # Check if client has close method (KiwoomClient does, simulator may not)
+            if hasattr(self.client, 'close'):
+                logger.info("Closing API client connection...")
+                await self.client.close()
+                logger.info("API client connection closed")
+
         # Clear queues
         while not self.market_data_queue.empty():
             try:
@@ -256,6 +345,20 @@ class TradingSystem:
                 self.order_queue.task_done()
             except asyncio.QueueEmpty:
                 break
+
+        # TimescaleDB 정리
+        if self.ts_log_handler:
+            logger.info("Stopping TimescaleDB log handler...")
+            await self.ts_log_handler.close_async()  # 마지막 로그 플러시
+            # 루트 로거에서 제거
+            root_logger = logging.getLogger()
+            root_logger.removeHandler(self.ts_log_handler)
+            logger.info("TimescaleDB log handler stopped")
+
+        if self.tsdb:
+            logger.info("Disconnecting from TimescaleDB...")
+            await self.tsdb.disconnect()
+            logger.info("Disconnected from TimescaleDB")
 
         logger.info("Trading system shutdown complete")
 

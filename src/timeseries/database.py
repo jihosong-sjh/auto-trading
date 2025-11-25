@@ -192,6 +192,35 @@ class TimeSeriesDB:
             except Exception:
                 pass
 
+            # 시스템 이벤트 로그 테이블 (모든 로그를 구조화하여 저장)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS system_event_logs (
+                    time TIMESTAMPTZ NOT NULL,
+                    log_level VARCHAR(20) NOT NULL,
+                    logger_name VARCHAR(100) NOT NULL,
+                    message TEXT NOT NULL,
+                    module VARCHAR(100),
+                    function_name VARCHAR(100),
+                    line_number INTEGER,
+                    exception_info TEXT,
+                    context JSONB,
+                    PRIMARY KEY (time, logger_name, log_level)
+                );
+            """)
+
+            # Hypertable 생성
+            try:
+                await conn.execute("""
+                    SELECT create_hypertable(
+                        'system_event_logs',
+                        'time',
+                        if_not_exists => TRUE,
+                        chunk_time_interval => INTERVAL '1 day'
+                    );
+                """)
+            except Exception:
+                pass
+
             # 백테스트 결과 테이블
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS backtest_results (
@@ -231,6 +260,16 @@ class TimeSeriesDB:
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_performance_metrics_strategy
                 ON performance_metrics (strategy, time DESC);
+            """)
+
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_system_event_logs_level_time
+                ON system_event_logs (log_level, time DESC);
+            """)
+
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_system_event_logs_logger_time
+                ON system_event_logs (logger_name, time DESC);
             """)
 
             # Continuous Aggregates (실시간 집계 뷰)

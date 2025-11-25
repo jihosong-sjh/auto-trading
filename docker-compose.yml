@@ -1,0 +1,118 @@
+# Auto Trading Infrastructure
+# Integrated Docker Compose for all services
+#
+# Prerequisites:
+#   1. Copy .env.example to .env
+#   2. Update credentials in .env file
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up -d redis        # Start only redis
+#   docker-compose down               # Stop all services
+#   docker-compose logs -f grafana    # View grafana logs
+#
+# Services:
+#   - Redis: Cache and message broker (port 6379)
+#   - TimescaleDB: Time-series database (port 5432)
+#   - Prometheus: Metrics collection (port 9091)
+#   - Grafana: Monitoring dashboard (port 3000)
+
+version: '3.8'
+
+services:
+  # Redis - Cache and Message Broker
+  redis:
+    image: redis:8.4.0-alpine
+    container_name: auto-trading-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --appendfsync everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - trading
+
+  # TimescaleDB - Time-series Database
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: auto-trading-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - trading
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: auto-trading-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    restart: unless-stopped
+    networks:
+      - trading
+
+  # Grafana - Monitoring Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: auto-trading-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+      - timescaledb
+    restart: unless-stopped
+    networks:
+      - trading
+
+volumes:
+  redis-data:
+    driver: local
+  timescaledb-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  trading:
+    driver: bridge

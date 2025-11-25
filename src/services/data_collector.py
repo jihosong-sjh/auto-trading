@@ -403,13 +403,11 @@ class StaggeredPricePoller:
                             # Redis 캐시 미스: API 호출 후 Redis에 저장
                             stock = await self.client.get_stock_price(stock_code)
 
-                            # Redis에 저장
+                            # Redis에 저장 (Decimal을 문자열로 변환)
                             price_data = {
                                 "code": stock_code,
-                                "name": stock.name,
-                                "price": stock.current_price,
-                                "change": stock.change,
-                                "change_rate": stock.change_rate,
+                                "name": stock.stock_name,
+                                "price": str(stock.current_price),  # Decimal -> str
                                 "volume": stock.volume
                             }
                             await redis_cache.set(stock_code, price_data, write_through=True)

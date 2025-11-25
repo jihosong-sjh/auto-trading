@@ -206,6 +206,7 @@ class KiwoomClient:
         method: str,
         endpoint: str,
         max_retries: int = 3,
+        tr_id: str | None = None,
         **kwargs
     ) -> dict[str, Any]:
         """API 요청 실행 (재시도 로직 포함)."""
@@ -230,6 +231,10 @@ class KiwoomClient:
 
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self.access_token}"
+        headers["appkey"] = self.api_key
+        headers["appsecret"] = self.api_secret
+        if tr_id:
+            headers["api-id"] = tr_id  # Kiwoom API uses "api-id" header
 
         retry_count = 0
         last_exception = None
@@ -246,7 +251,24 @@ class KiwoomClient:
                 # Success response (2xx status codes)
                 if response.is_success:
                     try:
-                        return response.json()
+                        json_data = response.json()
+
+                        # Check Kiwoom-specific return_code in response body
+                        # return_code: 0 = success, non-zero = error
+                        if "return_code" in json_data:
+                            return_code = json_data.get("return_code")
+                            if return_code != 0:
+                                return_msg = json_data.get("return_msg", "Unknown error")
+                                logger.error(f"API returned error: code={return_code}, msg={return_msg}")
+                                raise KiwoomAPIError(
+                                    f"API error (return_code: {return_code}): {return_msg}",
+                                    status_code=200,
+                                    response_data=json_data
+                                )
+
+                        return json_data
+                    except KiwoomAPIError:
+                        raise
                     except Exception as e:
                         logger.error(f"Failed to parse success response as JSON: {e}")
                         raise KiwoomAPIError(f"Invalid JSON in success response: {str(e)}") from e
@@ -353,20 +375,42 @@ class KiwoomClient:
         logger.info(f"Fetching stock price for {stock_code}")
 
         payload = {
-            "tr_cd": "ka10006",  # 주식시세요청
-            "stk_cd": stock_code
+            "stk_cd": stock_code  # Only stock code in body
         }
 
-        data = await self._request("POST", "/api/dostk/mrkcond", json=payload)
+        data = await self._request("POST", "/api/dostk/mrkcond", tr_id="ka10006", json=payload)
+
+        # Parse response (Kiwoom Mock API format)
+        # Field mapping:
+        # - close_pric: 현재가 (+ prefix means positive)
+        # - open_pric, high_pric, low_pric: OHLC
+        # - trde_qty: 거래량
+
+        def parse_price(price_str: str) -> Decimal:
+            """Parse price string like '+101400' or '-255000' to Decimal."""
+            if not price_str:
+                return Decimal("0")
+            # Remove leading '+' or '-' sign for Decimal conversion
+            clean_price = price_str.lstrip('+-')
+            # Get absolute value (prices should always be positive)
+            return Decimal(clean_price)
+
+        # Infer market from stock code (since API doesn't provide it)
+        # KOSPI: 000000~099999 (typical, not absolute rule)
+        stock_code_int = int(stock_code)
+        market = "KOSPI" if stock_code_int < 100000 else "KOSDAQ"
+
+        # Stock name fallback (API may not provide it in ka10006)
+        stock_name = data.get("stk_nm") or f"Stock_{stock_code}"
 
         return Stock(
             stock_code=stock_code,
-            stock_name=data.get("stk_nm", ""),
-            market=data.get("mrkt_tp", ""),
-            current_price=Decimal(str(data["cur_prc"])),
-            open_price=Decimal(str(data["open_pric"])) if data.get("open_pric") else None,
-            high_price=Decimal(str(data["high_pric"])) if data.get("high_pric") else None,
-            low_price=Decimal(str(data["low_pric"])) if data.get("low_pric") else None,
+            stock_name=stock_name,
+            market=market,
+            current_price=parse_price(data.get("close_pric", "0")),
+            open_price=parse_price(data.get("open_pric")) if data.get("open_pric") else None,
+            high_price=parse_price(data.get("high_pric")) if data.get("high_pric") else None,
+            low_price=parse_price(data.get("low_pric")) if data.get("low_pric") else None,
             volume=int(data.get("trde_qty", 0)),
             updated_at=datetime.now(tz=KST)
         )

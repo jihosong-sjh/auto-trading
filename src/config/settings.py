@@ -163,6 +163,32 @@ class Settings(BaseSettings):
         default=1.0, description="변동성 임계값 (%) - TTL 조정 기준"
     )
 
+    # TimescaleDB 설정 (실시간 이벤트 로그 저장)
+    enable_timescaledb: bool = Field(
+        default=False, description="TimescaleDB 활성화 여부"
+    )
+    timescaledb_host: str = Field(
+        default="localhost", description="TimescaleDB 호스트"
+    )
+    timescaledb_port: int = Field(
+        default=5432, description="TimescaleDB 포트"
+    )
+    timescaledb_database: str = Field(
+        default="trading", description="TimescaleDB 데이터베이스 이름"
+    )
+    timescaledb_user: str = Field(
+        default="postgres", description="TimescaleDB 사용자 이름"
+    )
+    timescaledb_password: str = Field(
+        default="postgres", description="TimescaleDB 패스워드"
+    )
+    timescaledb_min_pool_size: int = Field(
+        default=10, description="TimescaleDB 최소 연결 풀 크기"
+    )
+    timescaledb_max_pool_size: int = Field(
+        default=20, description="TimescaleDB 최대 연결 풀 크기"
+    )
+
     # 데이터 수집 설정
     data_polling_interval: float = Field(
         default=1.0,

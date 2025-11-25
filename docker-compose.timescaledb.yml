@@ -1,0 +1,40 @@
+# Docker Compose for TimescaleDB
+# 실시간 이벤트 로그 및 시계열 데이터 저장
+#
+# Usage:
+#   docker-compose -f docker-compose.timescaledb.yml up -d
+
+version: '3.8'
+
+services:
+  # TimescaleDB - PostgreSQL 기반 시계열 데이터베이스
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: auto-trading-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trading
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+      # TimescaleDB 튜닝
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - trading
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  timescaledb-data:
+    driver: local
+
+networks:
+  trading:
+    driver: bridge
