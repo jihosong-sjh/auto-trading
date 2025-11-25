@@ -20,81 +20,74 @@ export function TradeHistory({ trades }: Props) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
-      <div className="px-4 py-3 border-b">
-        <h2 className="text-lg font-semibold">Today's Trades ({trades.length})</h2>
+    <div className="section-card section-trade">
+      <div className="section-header">
+        <div className="section-header-icon"></div>
+        <h2 className="section-title">오늘의 거래내역</h2>
+        {trades.length > 0 && <span className="section-count">{trades.length}건</span>}
       </div>
       {trades.length === 0 ? (
-        <div className="p-8 text-center text-gray-500">
-          No trades today
+        <div className="empty-state">
+          <svg className="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          <p className="text-slate-500">오늘 체결된 거래가 없습니다</p>
         </div>
       ) : (
-        <div className="overflow-x-auto max-h-64">
-          <table className="w-full">
-            <thead className="bg-gray-50 sticky top-0">
+        <div className="overflow-x-auto max-h-80">
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Time
-                </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Stock
-                </th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Qty
-                </th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Price
-                </th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  P&L
-                </th>
+                <th className="text-left">체결시간</th>
+                <th className="text-center">구분</th>
+                <th className="text-left">종목코드</th>
+                <th className="text-right">수량</th>
+                <th className="text-right">체결가</th>
+                <th className="text-right">실현손익</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody>
               {trades.map((trade) => {
                 const pnl = trade.realized_pnl ? parseFloat(trade.realized_pnl) : null;
                 const isBuy = trade.order_type === 'BUY';
 
                 return (
-                  <tr key={trade.order_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                  <tr key={trade.order_id}>
+                    <td className="whitespace-nowrap text-slate-500">
                       {formatTime(trade.filled_at)}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-medium rounded ${
-                          isBuy
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-blue-100 text-blue-800'
-                        }`}
-                      >
-                        {trade.order_type}
+                    <td className="whitespace-nowrap text-center">
+                      <span className={`badge ${isBuy ? 'badge-buy' : 'badge-sell'}`}>
+                        {isBuy ? '매수' : '매도'}
                       </span>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
+                    <td className="whitespace-nowrap">
+                      <span className="font-medium text-slate-800">
                         {trade.stock_code}
-                      </div>
+                      </span>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-right text-sm text-gray-900">
+                    <td className="whitespace-nowrap text-right text-slate-700 number-currency">
                       {formatNumber(trade.quantity)}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-right text-sm text-gray-900">
+                    <td className="whitespace-nowrap text-right text-slate-700 number-currency">
                       {formatKRW(trade.filled_price)}
                     </td>
-                    <td
-                      className={`px-4 py-2 whitespace-nowrap text-right text-sm font-medium ${
-                        pnl === null
-                          ? 'text-gray-400'
-                          : pnl >= 0
-                          ? 'text-green-600'
-                          : 'text-red-600'
-                      }`}
-                    >
-                      {pnl !== null ? formatKRW(pnl) : '-'}
+                    <td className={`whitespace-nowrap text-right number-currency ${
+                      pnl === null
+                        ? 'text-slate-400'
+                        : pnl >= 0
+                        ? 'text-profit'
+                        : 'text-loss'
+                    }`}>
+                      {pnl !== null ? (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-sm ${
+                          pnl >= 0 ? 'bg-red-50' : 'bg-blue-50'
+                        }`}>
+                          {pnl >= 0 ? '+' : ''}{formatKRW(pnl)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
                     </td>
                   </tr>
                 );

@@ -16,23 +16,25 @@ export function ConnectionStatus({ status }: Props) {
     return date.toLocaleTimeString('ko-KR');
   };
 
+  const getStatusInfo = () => {
+    if (connected) {
+      return { text: '연결됨', dotClass: 'connected' };
+    }
+    if (reconnecting) {
+      return { text: '재연결 중...', dotClass: 'reconnecting' };
+    }
+    return { text: '연결 끊김', dotClass: 'disconnected' };
+  };
+
+  const { text, dotClass } = getStatusInfo();
+
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <div
-        className={`w-3 h-3 rounded-full ${
-          connected
-            ? 'bg-green-500'
-            : reconnecting
-            ? 'bg-yellow-500 animate-pulse'
-            : 'bg-red-500'
-        }`}
-      />
-      <span className="text-gray-600">
-        {connected ? 'Connected' : reconnecting ? 'Reconnecting...' : 'Disconnected'}
-      </span>
+    <div className="connection-status">
+      <div className={`connection-dot ${dotClass}`} />
+      <span className="text-white text-sm font-medium">{text}</span>
       {lastUpdate && (
-        <span className="text-gray-400 ml-2">
-          Last update: {formatTime(lastUpdate)}
+        <span className="text-slate-400 text-xs ml-2 hidden sm:inline">
+          최근 업데이트: {formatTime(lastUpdate)}
         </span>
       )}
     </div>

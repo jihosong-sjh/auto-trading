@@ -1,27 +1,368 @@
+/* Font Configuration - Korean optimized (must be first) */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Custom styles */
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+/* ========================================
+   Korean Stock Trading Dashboard Styles
+   ======================================== */
+
+:root {
+  /* Primary Colors - Stock Trading Theme */
+  --color-profit: #dc2626;      /* Red for profit (Korean style) */
+  --color-loss: #2563eb;        /* Blue for loss (Korean style) */
+  --color-neutral: #64748b;
+
+  /* Header & Accent Colors */
+  --color-header-bg: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+  --color-accent: #f59e0b;
+  --color-accent-light: #fbbf24;
+
+  /* Section Colors */
+  --color-portfolio-border: #f59e0b;
+  --color-position-border: #3b82f6;
+  --color-trade-border: #10b981;
+
+  /* Background Colors */
+  --color-card-bg: #ffffff;
+  --color-section-bg: #f8fafc;
+  --color-table-header: #f1f5f9;
+  --color-table-row-hover: #f8fafc;
 }
 
-/* Scrollbar styling */
+body {
+  font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(180deg, #f0f4f8 0%, #e2e8f0 100%);
+  min-height: 100vh;
+}
+
+/* ========================================
+   Header Styles
+   ======================================== */
+.dashboard-header {
+  background: var(--color-header-bg);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.dashboard-title {
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  background: linear-gradient(90deg, #ffffff 0%, #fbbf24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ========================================
+   Section Card Styles
+   ======================================== */
+.section-card {
+  background: var(--color-card-bg);
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  transition: box-shadow 0.2s ease;
+}
+
+.section-card:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+}
+
+.section-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-header-icon {
+  width: 8px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1e293b;
+  letter-spacing: -0.025em;
+}
+
+.section-count {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+/* Portfolio Section */
+.section-portfolio .section-header-icon { background: var(--color-portfolio-border); }
+.section-portfolio .section-header { border-bottom-color: #fef3c7; background: linear-gradient(90deg, #fffbeb 0%, #ffffff 100%); }
+
+/* Position Section */
+.section-position .section-header-icon { background: var(--color-position-border); }
+.section-position .section-header { border-bottom-color: #dbeafe; background: linear-gradient(90deg, #eff6ff 0%, #ffffff 100%); }
+
+/* Trade Section */
+.section-trade .section-header-icon { background: var(--color-trade-border); }
+.section-trade .section-header { border-bottom-color: #d1fae5; background: linear-gradient(90deg, #ecfdf5 0%, #ffffff 100%); }
+
+/* ========================================
+   Summary Card Styles
+   ======================================== */
+.summary-card {
+  background: var(--color-card-bg);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.summary-card:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+}
+
+.summary-card-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #64748b;
+  margin-bottom: 8px;
+  letter-spacing: 0.025em;
+}
+
+.summary-card-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.summary-card-subtitle {
+  font-size: 0.8125rem;
+  color: #94a3b8;
+  margin-top: 6px;
+}
+
+/* ========================================
+   Table Styles
+   ======================================== */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table thead {
+  background: var(--color-table-header);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.data-table th {
+  padding: 14px 16px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.data-table td {
+  padding: 14px 16px;
+  font-size: 0.875rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.data-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.data-table tbody tr:hover {
+  background-color: var(--color-table-row-hover);
+}
+
+/* ========================================
+   Color Classes - Korean Stock Style
+   Profit = Red, Loss = Blue
+   ======================================== */
+.text-profit {
+  color: var(--color-profit) !important;
+  font-weight: 600;
+}
+
+.text-loss {
+  color: var(--color-loss) !important;
+  font-weight: 600;
+}
+
+.text-neutral {
+  color: var(--color-neutral);
+}
+
+.bg-profit-light {
+  background-color: #fef2f2;
+}
+
+.bg-loss-light {
+  background-color: #eff6ff;
+}
+
+/* ========================================
+   Badge Styles
+   ======================================== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+  letter-spacing: 0.025em;
+}
+
+.badge-buy {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.badge-sell {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+/* ========================================
+   Connection Status Styles
+   ======================================== */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.connection-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.connection-dot.connected {
+  background: #22c55e;
+  box-shadow: 0 0 12px #22c55e;
+}
+
+.connection-dot.reconnecting {
+  background: #eab308;
+  animation: pulse 1.5s infinite;
+}
+
+.connection-dot.disconnected {
+  background: #ef4444;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px #eab308; }
+  50% { opacity: 0.6; box-shadow: 0 0 16px #eab308; }
+}
+
+/* ========================================
+   Footer Styles
+   ======================================== */
+.dashboard-footer {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border-top: 1px solid #e2e8f0;
+}
+
+/* ========================================
+   Empty State Styles
+   ======================================== */
+.empty-state {
+  padding: 48px 24px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  opacity: 0.5;
+}
+
+/* ========================================
+   Loading Skeleton
+   ======================================== */
+.skeleton {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ========================================
+   Scrollbar Styling
+   ======================================== */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #f1f5f9;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: #cbd5e1;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a1a1a1;
+  background: #94a3b8;
+}
+
+/* ========================================
+   Number Formatting
+   ======================================== */
+.number-currency {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.number-positive::before {
+  content: "+";
+}
+
+/* ========================================
+   Responsive Adjustments
+   ======================================== */
+@media (max-width: 768px) {
+  .summary-card-value {
+    font-size: 1.25rem;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 10px 12px;
+    font-size: 0.8125rem;
+  }
 }
