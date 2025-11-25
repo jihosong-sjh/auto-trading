@@ -219,8 +219,10 @@ class RedisPriceCache:
 
             prev_price = prev_data["price"]
 
-            # 가격이 문자열이면 숫자로 변환
+            # 가격을 float로 변환 (문자열, Decimal 등 처리)
             if isinstance(prev_price, str):
+                prev_price = float(prev_price)
+            elif isinstance(prev_price, Decimal):
                 prev_price = float(prev_price)
 
             # 가격 변화율 계산
@@ -243,10 +245,10 @@ class RedisPriceCache:
                 ttl = self.max_ttl
                 logger.debug(f"{stock_code}: Low volatility ({change_rate:.2f}%), TTL={ttl}s")
 
-            # 변동성 정보 저장
-            volatility_key = f"{self.volatility_prefix}{stock_code}"
+            # 변동성 정보 저장 (최근 변화율 - 별도 키 사용)
+            volatility_recent_key = f"{self.volatility_prefix}recent:{stock_code}"
             await self.redis.set(
-                volatility_key,
+                volatility_recent_key,
                 {
                     "change_rate": change_rate,
                     "ttl": ttl,
@@ -318,11 +320,11 @@ class RedisPriceCache:
             # 변동계수 (Coefficient of Variation)
             cv = (std_dev / mean * 100) if mean > 0 else 0
 
-            # 변동성 정보 업데이트
-            volatility_key = f"{self.volatility_prefix}{stock_code}"
-            await self.redis.hset(volatility_key, "cv", cv)
-            await self.redis.hset(volatility_key, "std_dev", std_dev)
-            await self.redis.hset(volatility_key, "mean", mean)
+            # 변동성 통계 업데이트 (해시 타입 - 별도 키 사용)
+            volatility_stats_key = f"{self.volatility_prefix}stats:{stock_code}"
+            await self.redis.hset(volatility_stats_key, "cv", cv)
+            await self.redis.hset(volatility_stats_key, "std_dev", std_dev)
+            await self.redis.hset(volatility_stats_key, "mean", mean)
 
         except Exception as e:
             logger.error(f"Failed to update volatility for {stock_code}: {e}")
@@ -374,9 +376,9 @@ class RedisPriceCache:
 
                 hit_rate = (hits / (hits + misses) * 100) if (hits + misses) > 0 else 0
 
-                # 변동성 정보
-                volatility_key = f"{self.volatility_prefix}{stock_code}"
-                volatility = await self.redis.hgetall(volatility_key)
+                # 변동성 통계 정보
+                volatility_stats_key = f"{self.volatility_prefix}stats:{stock_code}"
+                volatility = await self.redis.hgetall(volatility_stats_key)
 
                 return {
                     "stock_code": stock_code,
@@ -409,7 +411,8 @@ class RedisPriceCache:
             keys = [
                 f"{self.price_prefix}{stock_code}",
                 f"{self.history_prefix}{stock_code}",
-                f"{self.volatility_prefix}{stock_code}"
+                f"{self.volatility_prefix}recent:{stock_code}",
+                f"{self.volatility_prefix}stats:{stock_code}"
             ]
 
             deleted = await self.redis.delete(*keys)
