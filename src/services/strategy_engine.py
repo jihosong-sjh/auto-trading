@@ -332,6 +332,58 @@ class StrategyEngine:
         # 전략 재로드
         return self.load_and_initialize_strategies()
 
+    async def initialize_historical_data(self, client) -> None:
+        """전략에 필요한 과거 차트 데이터 로드.
+
+        각 전략이 감시하는 종목에 대해 과거 차트 데이터를 조회하여
+        전략의 chart_data_cache에 저장합니다.
+
+        Args:
+            client: KiwoomClient 인스턴스
+        """
+        from ..models import ChartInterval
+
+        logger.info("Initializing historical chart data for strategies")
+
+        for strategy_name, strategy in self.strategies.items():
+            config = self.strategy_configs[strategy_name]
+
+            logger.info(f"[{strategy_name}] Loading historical data for {len(config.symbols)} stocks")
+
+            for stock_code in config.symbols:
+                try:
+                    # 전략이 차트 데이터를 사용하는지 확인 (set_chart_data 메서드 존재 여부)
+                    if not hasattr(strategy, 'set_chart_data'):
+                        logger.debug(
+                            f"[{strategy_name}] Strategy does not use chart data, skipping"
+                        )
+                        continue
+
+                    # 과거 100개 일봉 조회 (대부분의 전략은 20-50개면 충분)
+                    chart_data = await client.get_chart_data(
+                        stock_code=stock_code,
+                        interval=ChartInterval.DAY,
+                        limit=100
+                    )
+
+                    if chart_data:
+                        strategy.set_chart_data(stock_code, chart_data)
+                        logger.info(
+                            f"[{strategy_name}] Loaded {len(chart_data)} candles for {stock_code}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[{strategy_name}] No chart data returned for {stock_code}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"[{strategy_name}] Failed to load chart data for {stock_code}: {e}",
+                        exc_info=True
+                    )
+
+        logger.info("Historical chart data initialization completed")
+
     # T078: DataCollector 통합 메서드
     async def consume_market_data(self) -> None:
         """시장 데이터 큐에서 데이터를 소비하고 전략 평가 (T078).

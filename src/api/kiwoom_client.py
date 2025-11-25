@@ -463,12 +463,12 @@ class KiwoomClient:
             end_date = datetime.now(tz=KST)
 
         payload = {
-            "tr_cd": "ka10081",  # 주식일봉차트조회요청
             "stk_cd": stock_code,
-            "base_dt": end_date.strftime("%Y%m%d")
+            "base_dt": end_date.strftime("%Y%m%d"),
+            "upd_stkpc_tp": "1"  # 수정주가구분: 0=미적용, 1=적용
         }
 
-        data = await self._request("POST", "/api/dostk/chart", json=payload)
+        data = await self._request("POST", "/api/dostk/chart", tr_id="ka10081", json=payload)
 
         chart_list = []
         for item in data.get("stk_dt_pole_chart_qry", []):

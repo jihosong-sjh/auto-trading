@@ -10,6 +10,9 @@ from datetime import datetime
 from ..models import Stock, Position
 from ..models.strategy import BaseStrategy
 from ..models.chart_data import ChartData
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class GoldenCrossStrategy(BaseStrategy):
@@ -137,11 +140,18 @@ class GoldenCrossStrategy(BaseStrategy):
         """
         # 거래량 조건 확인
         if stock.volume < self.min_volume:
+            logger.debug(
+                f"[{stock.stock_code}] Volume too low: {stock.volume} < {self.min_volume}"
+            )
             return False
 
         # 차트 데이터 확인
         close_prices = self.get_close_prices(stock.stock_code)
         if len(close_prices) < self.long_period:
+            logger.debug(
+                f"[{stock.stock_code}] Insufficient data: {len(close_prices)} candles "
+                f"(need {self.long_period})"
+            )
             return False
 
         # 현재 시점 SMA 계산
@@ -167,6 +177,18 @@ class GoldenCrossStrategy(BaseStrategy):
             previous_short_sma <= previous_long_sma
             and current_short_sma > current_long_sma
         )
+
+        if golden_cross:
+            logger.info(
+                f"[{stock.stock_code}] GOLDEN CROSS detected! "
+                f"Short SMA({self.short_period}): {previous_short_sma:.2f} -> {current_short_sma:.2f}, "
+                f"Long SMA({self.long_period}): {previous_long_sma:.2f} -> {current_long_sma:.2f}"
+            )
+        else:
+            logger.debug(
+                f"[{stock.stock_code}] No signal. "
+                f"Short SMA: {current_short_sma:.2f}, Long SMA: {current_long_sma:.2f}"
+            )
 
         return golden_cross
 

@@ -238,6 +238,10 @@ class TradingSystem:
             f"Loaded {len(self.strategy_engine.strategies)} strategies"
         )
 
+        # Initialize historical chart data for strategies
+        await self.strategy_engine.initialize_historical_data(client)
+        logger.info("Historical chart data initialized for all strategies")
+
         # Collect all stock codes from strategies and register them to DataCollector
         all_stock_codes = set()
         for strategy_name, config in self.strategy_engine.strategy_configs.items():
