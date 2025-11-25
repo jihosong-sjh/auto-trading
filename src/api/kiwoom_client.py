@@ -544,7 +544,8 @@ class KiwoomClient:
             "stk_cd": order.stock_code,
             "ord_qty": order.quantity,
             "ord_uv": ord_uv,
-            "trde_tp": trde_tp
+            "trde_tp": trde_tp,
+            "dmst_stex_tp": "KRX"  # 국내거래소구분: KRX(한국거래소), NXT(넥스트레이드), SOR
         }
 
         data = await self._request("POST", "/api/dostk/ordr", tr_id=tr_cd, json=payload)
