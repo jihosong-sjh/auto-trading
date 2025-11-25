@@ -5,6 +5,7 @@
 T078: DataCollector와 asyncio.Queue를 통해 통합되어,
       실시간 시세 데이터를 수신하여 전략 평가를 수행합니다.
 T087: RiskManager를 통합하여 매 주문 전 위험 검증을 수행합니다.
+Phase 6: order_book_queue를 소비하여 호가 기반 전략에 실시간 호가 데이터 전달.
 """
 
 import asyncio
@@ -20,8 +21,10 @@ from pydantic import BaseModel, Field
 from ..models import Stock, PriceType, OrderType
 from ..models.strategy import BaseStrategy
 from ..models.account import Account
+from ..models.order_book import OrderBook
 from ..models.position import Position
 from ..models.order import Order
+from ..models.realtime_data import OrderBookData
 from .risk_manager import RiskManager
 
 # Forward declaration for type hints
@@ -84,6 +87,7 @@ class StrategyEngine:
         self,
         config_path: Optional[Path] = None,
         market_data_queue: Optional[asyncio.Queue] = None,
+        order_book_queue: Optional[asyncio.Queue] = None,
         risk_manager: Optional[RiskManager] = None,
         account: Optional[Account] = None,
         positions: Optional[Dict[str, Position]] = None,
@@ -94,6 +98,7 @@ class StrategyEngine:
         Args:
             config_path: 전략 설정 YAML 파일 경로. None이면 기본 경로 사용.
             market_data_queue: 시장 데이터를 수신할 asyncio.Queue (T078).
+            order_book_queue: 호가 데이터를 수신할 asyncio.Queue (Phase 6).
             risk_manager: 위험 관리자 (T087). None이면 기본 설정으로 생성.
             account: 현재 계좌 정보 (T087).
             positions: 현재 포지션 딕셔너리 (T087).
@@ -107,6 +112,10 @@ class StrategyEngine:
         self.market_data_queue = market_data_queue
         self.running = False
         self.consumer_task: Optional[asyncio.Task] = None
+
+        # Phase 6: 호가 데이터 큐
+        self.order_book_queue = order_book_queue
+        self._order_book_task: Optional[asyncio.Task] = None
 
         # T087: RiskManager 통합
         self.risk_manager = risk_manager or RiskManager(
@@ -672,14 +681,20 @@ class StrategyEngine:
     async def run(self) -> None:
         """전략 엔진 실행 (T078).
 
-        market_data_queue에서 데이터를 소비하는 백그라운드 태스크를 시작합니다.
+        market_data_queue 및 order_book_queue에서 데이터를 소비하는
+        백그라운드 태스크를 시작합니다.
         """
         if self.consumer_task is not None and not self.consumer_task.done():
             logger.warning("Strategy engine is already running")
             return
 
         self.consumer_task = asyncio.create_task(self.consume_market_data())
-        logger.info("Strategy engine started")
+        logger.info("Strategy engine started (market data consumer)")
+
+        # Phase 6: order_book_queue 소비 태스크 시작
+        if self.order_book_queue is not None:
+            self._order_book_task = asyncio.create_task(self._consume_order_book_data())
+            logger.info("Strategy engine started (order book consumer)")
 
     async def stop(self) -> None:
         """전략 엔진 중지 (T078)."""
@@ -697,7 +712,135 @@ class StrategyEngine:
             except asyncio.CancelledError:
                 pass
 
+        # Phase 6: order_book 태스크 취소 대기
+        if self._order_book_task and not self._order_book_task.done():
+            self._order_book_task.cancel()
+            try:
+                await self._order_book_task
+            except asyncio.CancelledError:
+                pass
+
         logger.info("Strategy engine stopped")
+
+    # =========================================================================
+    # Phase 6: order_book_queue 소비 로직
+    # =========================================================================
+
+    async def _consume_order_book_data(self) -> None:
+        """order_book_queue에서 호가 데이터를 소비하고 전략에 전달 (Phase 6).
+
+        호가 기반 전략(OrderBookImbalance 등)에 실시간 호가 데이터를
+        전달하여 전략 평가에 활용합니다.
+        """
+        if self.order_book_queue is None:
+            logger.debug("[Phase6] order_book_queue not configured, skipping")
+            return
+
+        logger.info(
+            "[Phase6] Starting order book data consumer for "
+            f"{len(self.strategies)} strategies"
+        )
+
+        try:
+            while self.running:
+                try:
+                    # 큐에서 호가 데이터 수신 (1초 타임아웃)
+                    order_book_data = await asyncio.wait_for(
+                        self.order_book_queue.get(),
+                        timeout=1.0
+                    )
+
+                    # OrderBookData -> OrderBook 변환 후 전략에 전달
+                    await self._distribute_order_book(order_book_data)
+
+                except asyncio.TimeoutError:
+                    # 큐에 데이터 없음 (정상)
+                    continue
+                except Exception as e:
+                    logger.error(f"[Phase6] Error consuming order book data: {e}")
+                    await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            logger.info("[Phase6] Order book data consumer cancelled")
+            raise
+        finally:
+            logger.info("[Phase6] Order book data consumer stopped")
+
+    async def _distribute_order_book(
+        self,
+        data: OrderBookData
+    ) -> None:
+        """호가 데이터를 관련 전략에 전달 (Phase 6).
+
+        set_order_book() 메서드를 가진 전략에만 데이터를 전달합니다.
+
+        Args:
+            data: WebSocket에서 수신한 호가 데이터.
+        """
+        stock_code = data.stock_code
+
+        # OrderBookData -> OrderBook 모델 변환
+        order_book = self._convert_order_book_data(data)
+
+        # 호가 기반 전략에 데이터 전달
+        for strategy_name, strategy in self.strategies.items():
+            # set_order_book 메서드가 있는 전략만 처리
+            if not hasattr(strategy, 'set_order_book'):
+                continue
+
+            # 해당 종목을 감시하는 전략인지 확인
+            config = self.strategy_configs.get(strategy_name)
+            if config and stock_code not in config.symbols:
+                continue
+
+            try:
+                strategy.set_order_book(stock_code, order_book)
+                logger.debug(
+                    f"[Phase6] Order book updated: {strategy_name} <- {stock_code} "
+                    f"(imbalance: {order_book.get_imbalance_ratio():.2%})"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[Phase6] Error setting order book for {strategy_name}: {e}"
+                )
+
+    def _convert_order_book_data(self, data: OrderBookData) -> OrderBook:
+        """OrderBookData(WebSocket 모델)를 OrderBook(도메인 모델)으로 변환.
+
+        Args:
+            data: WebSocket에서 수신한 호가 데이터.
+
+        Returns:
+            OrderBook 도메인 모델.
+        """
+        from ..models.order_book import OrderBookLevel
+
+        # 호가 레벨 리스트 생성
+        ask_levels = []
+        bid_levels = []
+
+        for i in range(min(len(data.ask_prices), 10)):
+            if i < len(data.ask_prices) and i < len(data.ask_quantities):
+                ask_levels.append(OrderBookLevel(
+                    price=data.ask_prices[i],
+                    quantity=data.ask_quantities[i]
+                ))
+
+        for i in range(min(len(data.bid_prices), 10)):
+            if i < len(data.bid_prices) and i < len(data.bid_quantities):
+                bid_levels.append(OrderBookLevel(
+                    price=data.bid_prices[i],
+                    quantity=data.bid_quantities[i]
+                ))
+
+        return OrderBook(
+            stock_code=data.stock_code,
+            ask_levels=ask_levels,
+            bid_levels=bid_levels,
+            total_ask_quantity=data.total_ask_quantity,
+            total_bid_quantity=data.total_bid_quantity,
+            timestamp=data.timestamp
+        )
 
     async def _set_stop_loss_take_profit(
         self,

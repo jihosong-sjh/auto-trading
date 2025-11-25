@@ -295,12 +295,14 @@ class TradingSystem:
                 logger.info("Initialized REST data collector (websocket_enabled=False)")
 
         # Initialize OrderExecutor first (StrategyEngine will need it)
+        # Phase 6: order_event_queue 전달하여 실시간 주문 이벤트 처리
         self.order_executor = OrderExecutor(
             client=client,
             pending_orders=self.pending_orders,
             positions=self.positions,
             risk_manager=None,  # Uses default RiskManager
-            account_service=None  # Will be set up later if needed
+            account_service=None,  # Will be set up later if needed
+            order_event_queue=self.order_event_queue  # Phase 6
         )
 
         # Initialize RiskMonitor (Phase 2)
@@ -320,9 +322,11 @@ class TradingSystem:
         logger.info("RiskMonitor initialized (1-second interval)")
 
         # Initialize StrategyEngine with OrderExecutor
+        # Phase 6: order_book_queue 전달하여 호가 기반 전략 지원
         self.strategy_engine = StrategyEngine(
             config_path=None,  # Uses default path: config/strategies.yaml
             market_data_queue=self.market_data_queue,
+            order_book_queue=self.order_book_queue,  # Phase 6
             risk_manager=None,  # Uses default RiskManager
             account=None,  # Will be updated when account info is fetched
             positions=self.positions,  # Share positions with OrderExecutor
@@ -377,6 +381,15 @@ class TradingSystem:
             )
             self.tasks.append(task)
             logger.info("RiskMonitor background task started")
+
+        # Phase 6: OrderExecutor order_event_queue 소비 태스크
+        if self.order_executor and self.order_event_queue:
+            task = asyncio.create_task(
+                self.order_executor.run(),
+                name="order_executor_events"
+            )
+            self.tasks.append(task)
+            logger.info("OrderExecutor event consumer started")
 
         # TimescaleDB 로그 플러시 태스크
         if self.ts_log_handler:
@@ -482,10 +495,11 @@ class TradingSystem:
             logger.info("Stopping RiskMonitor...")
             await self.risk_monitor.stop()
 
-        # OrderExecutor cleanup (if needed)
-        # Note: OrderExecutor doesn't have a close() method currently
+        # Phase 6: OrderExecutor cleanup
         if self.order_executor:
-            logger.debug("OrderExecutor cleanup - no action needed")
+            logger.info("Stopping OrderExecutor event consumer...")
+            await self.order_executor.stop()
+            logger.info("OrderExecutor stopped")
 
         # Close API client connection
         if self.client:

@@ -4,17 +4,20 @@
 T086: RiskManager 통합하여 주문 전 위험 검증을 수행합니다.
 T071: 주문 체결 시 계좌 상태 자동 업데이트를 수행합니다.
 Phase 5: 부분 체결 처리 로직 추가.
+Phase 6: order_event_queue 소비하여 실시간 주문 체결 상태 업데이트.
 """
 
+import asyncio
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Optional, Protocol
+from typing import Dict, Optional, Protocol, Union
 from zoneinfo import ZoneInfo
 
 from ..models import OrderStatus, OrderType
 from ..models.account import Account
 from ..models.order import Order
 from ..models.position import Position
+from ..models.realtime_data import BalanceUpdateData, OrderExecutionData
 from ..models.stock import Stock
 from ..utils.logger import get_logger
 from .account_service import AccountService
@@ -67,6 +70,7 @@ class OrderExecutor:
     """주문 실행기.
 
     주문 검증, 제출, 상태 추적을 담당합니다.
+    Phase 6: order_event_queue를 소비하여 실시간 주문 체결 상태를 업데이트합니다.
     """
 
     def __init__(
@@ -75,7 +79,8 @@ class OrderExecutor:
         pending_orders: Dict[str, Order],
         positions: Dict[str, Position],
         risk_manager: Optional[RiskManager] = None,
-        account_service: Optional[AccountService] = None
+        account_service: Optional[AccountService] = None,
+        order_event_queue: Optional[asyncio.Queue] = None
     ):
         """OrderExecutor를 초기화합니다.
 
@@ -85,22 +90,28 @@ class OrderExecutor:
             positions: 현재 포지션 딕셔너리 (stock_code -> Position)
             risk_manager: 위험 관리자 (T086). None이면 기본 설정으로 생성.
             account_service: 계좌 서비스 (T071). None이면 자동 생성.
+            order_event_queue: 주문/잔고 이벤트 큐 (Phase 6). WebSocket에서 수신.
         """
         self.client = client
         self.pending_orders = pending_orders
         self.positions = positions
         self.validator = OrderValidator()
         self.duplicate_checker = DuplicateOrderChecker(pending_orders)
-        
+
         # T086: RiskManager 통합
         self.risk_manager = risk_manager or RiskManager(
             daily_loss_limit_pct=Decimal("0.02"),  # 기본값: 2%
             max_position_concentration=Decimal("0.3"),  # 기본값: 30%
             warning_threshold=Decimal("0.8")  # 기본값: 80%
         )
-        
+
         # T071: AccountService 통합 (주문 체결 시 계좌 자동 업데이트)
         self.account_service = account_service or AccountService(provider=client)
+
+        # Phase 6: order_event_queue 통합
+        self.order_event_queue = order_event_queue
+        self._running = False
+        self._consumer_task: Optional[asyncio.Task] = None
 
     async def execute_order(self, order: Order) -> tuple[bool, Optional[str], Optional[Order]]:
         """주문을 검증하고 실행합니다.
@@ -483,3 +494,229 @@ class OrderExecutor:
                 exc_info=True
             )
             # 포지션 업데이트 실패는 주문 진행에 영향을 주지 않음
+
+    # =========================================================================
+    # Phase 6: order_event_queue 소비 로직
+    # =========================================================================
+
+    async def run(self) -> None:
+        """order_event_queue를 소비하는 백그라운드 태스크 시작.
+
+        WebSocket에서 수신한 주문 체결(00) 및 잔고 변동(04) 이벤트를
+        실시간으로 처리합니다.
+        """
+        if self.order_event_queue is None:
+            logger.debug("[Phase6] order_event_queue not configured, skipping")
+            return
+
+        self._running = True
+        logger.info("[Phase6] OrderExecutor event consumer started")
+
+        try:
+            while self._running:
+                try:
+                    # 큐에서 이벤트 수신 (1초 타임아웃)
+                    event = await asyncio.wait_for(
+                        self.order_event_queue.get(),
+                        timeout=1.0
+                    )
+
+                    # 이벤트 타입에 따라 처리
+                    if isinstance(event, OrderExecutionData):
+                        await self._handle_order_execution_event(event)
+                    elif isinstance(event, BalanceUpdateData):
+                        await self._handle_balance_update_event(event)
+                    else:
+                        logger.warning(f"[Phase6] Unknown event type: {type(event)}")
+
+                except asyncio.TimeoutError:
+                    # 큐에 데이터 없음 (정상)
+                    continue
+                except Exception as e:
+                    logger.error(f"[Phase6] Error consuming order event: {e}", exc_info=True)
+                    await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            logger.info("[Phase6] OrderExecutor event consumer cancelled")
+            raise
+        finally:
+            self._running = False
+            logger.info("[Phase6] OrderExecutor event consumer stopped")
+
+    async def stop(self) -> None:
+        """order_event_queue 소비 중지."""
+        if not self._running:
+            return
+
+        logger.info("[Phase6] Stopping OrderExecutor event consumer")
+        self._running = False
+
+        if self._consumer_task and not self._consumer_task.done():
+            self._consumer_task.cancel()
+            try:
+                await self._consumer_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _handle_order_execution_event(self, event: OrderExecutionData) -> None:
+        """주문 체결 이벤트 처리 (00 타입).
+
+        WebSocket에서 수신한 주문 상태 변경을 pending_orders에 반영합니다.
+
+        Args:
+            event: 주문 체결 데이터.
+        """
+        order_id = event.order_id
+        stock_code = event.stock_code
+        status = event.order_status
+
+        logger.info(
+            f"[Phase6] 주문 이벤트 수신: order_id={order_id}, "
+            f"stock={stock_code}, status={status}"
+        )
+
+        # pending_orders에서 해당 주문 찾기
+        order = self.pending_orders.get(order_id)
+
+        if order is None:
+            # 다른 세션에서 생성한 주문이거나 이미 완료된 주문
+            logger.debug(f"[Phase6] Order not found in pending_orders: {order_id}")
+            return
+
+        try:
+            # 상태 매핑 (WebSocket 상태 -> OrderStatus)
+            status_mapping = {
+                "접수": OrderStatus.SUBMITTED,
+                "체결": OrderStatus.FILLED,
+                "확인": OrderStatus.SUBMITTED,  # 접수 확인
+                "취소": OrderStatus.CANCELLED,
+                "거부": OrderStatus.REJECTED,
+            }
+
+            new_status = status_mapping.get(status)
+            if new_status is None:
+                logger.warning(f"[Phase6] Unknown order status: {status}")
+                return
+
+            old_status = order.status
+            order.status = new_status
+
+            # 체결 정보 업데이트
+            if event.filled_quantity > 0:
+                order.filled_quantity = event.filled_quantity
+            if event.filled_price > 0:
+                order.filled_price = event.filled_price
+            if event.unit_filled_price > 0:
+                # 단위 체결가가 있으면 이것을 우선 사용
+                order.filled_price = event.unit_filled_price
+
+            filled_price_str = f"{order.filled_price:,}" if order.filled_price else "0"
+            logger.info(
+                f"[Phase6] 주문 상태 업데이트: {order_id} "
+                f"{old_status.value} -> {new_status.value} "
+                f"(체결: {order.filled_quantity}주 @ {filled_price_str}원)"
+            )
+
+            # 완료 상태면 pending_orders에서 제거
+            if new_status in {
+                OrderStatus.FILLED,
+                OrderStatus.CANCELLED,
+                OrderStatus.REJECTED,
+                OrderStatus.FAILED
+            }:
+                self.pending_orders.pop(order_id, None)
+                logger.info(f"[Phase6] 주문 완료, pending에서 제거: {order_id}")
+
+                # 체결 완료 시 계좌 업데이트
+                if new_status == OrderStatus.FILLED:
+                    await self._update_account_on_fill(order)
+
+            # 부분 체결 처리
+            elif event.unfilled_quantity > 0 and event.filled_quantity > 0:
+                order.status = OrderStatus.PARTIALLY_FILLED
+                await self._update_position_on_partial_fill(order)
+
+        except Exception as e:
+            logger.error(
+                f"[Phase6] Error handling order execution event: {e}",
+                exc_info=True
+            )
+
+    async def _handle_balance_update_event(self, event: BalanceUpdateData) -> None:
+        """잔고 변동 이벤트 처리 (04 타입).
+
+        WebSocket에서 수신한 잔고 변동을 positions에 반영합니다.
+
+        Args:
+            event: 잔고 변동 데이터.
+        """
+        stock_code = event.stock_code
+        action = event.action  # "I" = 신규, "D" = 삭제
+
+        logger.info(
+            f"[Phase6] 잔고 이벤트 수신: stock={stock_code}, "
+            f"action={action}, qty={event.holding_quantity}, "
+            f"avg_price={event.average_price:,.0f}원"
+        )
+
+        try:
+            if event.is_position_closed():
+                # 포지션 삭제 (전량 매도)
+                if stock_code in self.positions:
+                    old_position = self.positions.pop(stock_code)
+                    logger.info(
+                        f"[Phase6] 포지션 삭제: {stock_code} "
+                        f"(기존 {old_position.quantity}주 -> 0주)"
+                    )
+
+                    # 실현 손익 로깅
+                    if event.realized_pnl != 0:
+                        logger.info(
+                            f"[Phase6] 실현 손익: {event.realized_pnl:+,.0f}원 "
+                            f"({event.realized_pnl_rate:+.2f}%)"
+                        )
+                else:
+                    logger.debug(f"[Phase6] Position already removed: {stock_code}")
+
+            elif event.is_new_position() or event.holding_quantity > 0:
+                # 신규 포지션 또는 포지션 업데이트
+                if stock_code in self.positions:
+                    # 기존 포지션 업데이트
+                    position = self.positions[stock_code]
+                    old_qty = position.quantity
+                    old_avg = position.average_buy_price
+
+                    position.quantity = event.holding_quantity
+                    position.average_buy_price = event.average_price
+                    position.current_price = event.current_price
+
+                    logger.info(
+                        f"[Phase6] 포지션 업데이트: {stock_code} "
+                        f"{old_qty}주 @ {old_avg:,.0f}원 -> "
+                        f"{position.quantity}주 @ {position.average_buy_price:,.0f}원"
+                    )
+                else:
+                    # 신규 포지션 생성
+                    from ..models.position import Position as PositionModel
+                    new_position = PositionModel(
+                        account_number=event.account_number,
+                        stock_code=stock_code,
+                        quantity=event.holding_quantity,
+                        average_buy_price=event.average_price,
+                        current_price=event.current_price,
+                        strategy_name="WebSocket"  # 외부에서 생성된 포지션
+                    )
+                    self.positions[stock_code] = new_position
+                    logger.info(
+                        f"[Phase6] 신규 포지션 생성: {stock_code} "
+                        f"{event.holding_quantity}주 @ {event.average_price:,.0f}원"
+                    )
+
+            # 계좌 정보 갱신
+            await self.account_service.refresh_account()
+
+        except Exception as e:
+            logger.error(
+                f"[Phase6] Error handling balance update event: {e}",
+                exc_info=True
+            )
