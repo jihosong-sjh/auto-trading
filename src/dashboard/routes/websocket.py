@@ -9,7 +9,7 @@ Provides a WebSocket endpoint that:
 import asyncio
 from typing import Any, Dict
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ...utils.logger import get_logger
 from ..services.data_subscriber import DashboardDataSubscriber
@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, request: Request):
+async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time dashboard updates.
 
     Protocol:
@@ -41,7 +41,7 @@ async def websocket_endpoint(websocket: WebSocket, request: Request):
         "timestamp": "2024-01-01T10:00:00+09:00"
     }
     """
-    subscriber: DashboardDataSubscriber = request.app.state.subscriber
+    subscriber: DashboardDataSubscriber = websocket.app.state.subscriber
 
     # Accept connection
     await websocket.accept()
