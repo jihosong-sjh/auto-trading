@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from .stock import Stock
 from .position import Position
+from ..api.rate_limiter import RequestPriority
 
 
 class BaseStrategy(ABC):
@@ -13,15 +14,18 @@ class BaseStrategy(ABC):
 
     Attributes:
         strategy_name: 전략 이름.
+        priority: 차트 데이터 로딩 우선순위 (RequestPriority).
     """
 
-    def __init__(self, strategy_name: str):
+    def __init__(self, strategy_name: str, priority: RequestPriority = RequestPriority.MEDIUM):
         """전략 초기화.
 
         Args:
             strategy_name: 전략 고유 이름.
+            priority: 차트 데이터 로딩 우선순위 (기본값: MEDIUM).
         """
         self.strategy_name = strategy_name
+        self.priority = priority
 
     @abstractmethod
     async def evaluate_buy_signal(self, stock: Stock) -> bool:
@@ -66,12 +70,13 @@ class BaseStrategy(ABC):
         pass
 
     @abstractmethod
-    def calculate_position_size(
+    async def calculate_position_size(
         self, stock: Stock, available_balance: float
     ) -> Optional[int]:
-        """포지션 크기 계산.
+        """포지션 크기 계산 (비동기).
 
         매수할 수량을 계산합니다.
+        향후 외부 API 호출(예: 재무제표 조회, 뉴스 분석 등)을 지원하기 위해 비동기로 구현합니다.
 
         Args:
             stock: 매수할 종목.
@@ -83,7 +88,7 @@ class BaseStrategy(ABC):
         Example:
             >>> strategy = MyStrategy("Example")
             >>> stock = Stock(...)
-            >>> quantity = strategy.calculate_position_size(stock, 1000000)
+            >>> quantity = await strategy.calculate_position_size(stock, 1000000)
             >>> print(f"Buy {quantity} shares")
         """
         pass

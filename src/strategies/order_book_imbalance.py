@@ -9,6 +9,7 @@ from typing import Optional
 from ..models import Stock, Position
 from ..models.strategy import BaseStrategy
 from ..models.order_book import OrderBook
+from ..api.rate_limiter import RequestPriority
 
 
 class OrderBookImbalanceStrategy(BaseStrategy):
@@ -56,7 +57,8 @@ class OrderBookImbalanceStrategy(BaseStrategy):
         Raises:
             ValueError: 파라미터 값이 유효하지 않은 경우.
         """
-        super().__init__("OrderBookImbalance")
+        # 부모 클래스 초기화 (MEDIUM priority)
+        super().__init__("OrderBookImbalance", priority=RequestPriority.MEDIUM)
         
         if not 0 <= buy_threshold <= 1:
             raise ValueError("buy_threshold must be between 0 and 1")
@@ -164,20 +166,20 @@ class OrderBookImbalanceStrategy(BaseStrategy):
         
         return False
     
-    def calculate_position_size(
+    async def calculate_position_size(
         self,
         stock: Stock,
         available_balance: float
     ) -> Optional[int]:
-        """포지션 크기 계산.
-        
+        """포지션 크기 계산 (비동기).
+
         가용 자금의 일부(position_size_pct)를 투자합니다.
         스캘핑 전략이므로 보수적으로 포지션 크기를 조절합니다.
-        
+
         Args:
             stock: 종목 정보.
             available_balance: 사용 가능한 잔고.
-        
+
         Returns:
             매수 수량 (주). None이면 매수하지 않음.
         """

@@ -9,6 +9,7 @@ from typing import List, Optional
 from ..models import Stock, Position
 from ..models.strategy import BaseStrategy
 from ..models.chart_data import ChartData
+from ..api.rate_limiter import RequestPriority
 
 
 class VWAPDeviationStrategy(BaseStrategy):
@@ -56,7 +57,8 @@ class VWAPDeviationStrategy(BaseStrategy):
         Raises:
             ValueError: 파라미터 값이 유효하지 않은 경우.
         """
-        super().__init__("VWAPDeviation")
+        # 부모 클래스 초기화 (MEDIUM priority)
+        super().__init__("VWAPDeviation", priority=RequestPriority.MEDIUM)
 
         if buy_threshold <= 0:
             raise ValueError("buy_threshold must be > 0")
@@ -216,12 +218,12 @@ class VWAPDeviationStrategy(BaseStrategy):
 
         return False
 
-    def calculate_position_size(
+    async def calculate_position_size(
         self,
         stock: Stock,
         available_balance: float
     ) -> Optional[int]:
-        """포지션 크기 계산.
+        """포지션 크기 계산 (비동기).
 
         가용 자금의 일부(position_size_pct)를 투자합니다.
 

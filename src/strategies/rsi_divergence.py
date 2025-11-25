@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 from ..models import Stock, Position
 from ..models.strategy import BaseStrategy
 from ..models.chart_data import ChartData
+from ..api.rate_limiter import RequestPriority
 
 
 class RSIDivergenceStrategy(BaseStrategy):
@@ -63,7 +64,8 @@ class RSIDivergenceStrategy(BaseStrategy):
         Raises:
             ValueError: 파라미터 값이 유효하지 않은 경우.
         """
-        super().__init__("RSIDivergence")
+        # 부모 클래스 초기화 (MEDIUM priority)
+        super().__init__("RSIDivergence", priority=RequestPriority.MEDIUM)
 
         if rsi_period < 2:
             raise ValueError("rsi_period must be >= 2")
@@ -281,12 +283,12 @@ class RSIDivergenceStrategy(BaseStrategy):
 
         return self.detect_bearish_divergence(recent_prices, recent_rsi_values)
 
-    def calculate_position_size(
+    async def calculate_position_size(
         self,
         stock: Stock,
         available_balance: float
     ) -> Optional[int]:
-        """포지션 크기 계산.
+        """포지션 크기 계산 (비동기).
 
         가용 자금의 일부(position_size_pct)를 투자합니다.
 

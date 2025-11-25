@@ -28,7 +28,7 @@ from .exceptions import (
     KiwoomAPIError,
     RateLimitExceededError,
 )
-from .rate_limiter import RateLimiter
+from .rate_limiter import RateLimiter, RequestPriority
 from ..cache.distributed_rate_limiter import DistributedRateLimiter
 
 KST = ZoneInfo("Asia/Seoul")
@@ -207,9 +207,19 @@ class KiwoomClient:
         endpoint: str,
         max_retries: int = 3,
         tr_id: str | None = None,
+        priority: RequestPriority = RequestPriority.LOW,
         **kwargs
     ) -> dict[str, Any]:
-        """API 요청 실행 (재시도 로직 포함)."""
+        """API 요청 실행 (재시도 로직 포함).
+
+        Args:
+            method: HTTP 메서드 (GET, POST 등)
+            endpoint: API 엔드포인트
+            max_retries: 최대 재시도 횟수
+            tr_id: 거래 ID
+            priority: 요청 우선순위 (기본값: LOW)
+            **kwargs: 추가 요청 파라미터
+        """
         if not self.client:
             raise KiwoomAPIError("Client not connected. Call connect() first.")
 
@@ -226,8 +236,11 @@ class KiwoomClient:
             if not success:
                 raise RateLimitExceededError("Distributed rate limit exceeded")
         else:
-            # 로컬 rate limiter 사용
-            await self.local_rate_limiter.acquire()
+            # 로컬 rate limiter 사용 (우선순위 기반)
+            await self.local_rate_limiter.acquire(
+                priority=priority,
+                description=f"{method} {endpoint} (tr_id={tr_id})"
+            )
 
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {self.access_token}"
@@ -449,15 +462,24 @@ class KiwoomClient:
         interval: ChartInterval = ChartInterval.DAY,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
-        limit: int = 100
+        limit: int = 100,
+        priority: RequestPriority = RequestPriority.BACKGROUND
     ) -> list[ChartData]:
         """일봉 차트 데이터 조회 (ka10081).
 
         URL: POST /api/dostk/chart
         Request: tr_cd, stk_cd, base_dt
         Response: stk_dt_pole_chart_qry (dt, open_pric, high_pric, low_pric, cur_prc, trde_qty)
+
+        Args:
+            stock_code: 종목 코드
+            interval: 차트 간격
+            start_date: 시작 날짜
+            end_date: 종료 날짜
+            limit: 조회 개수
+            priority: 요청 우선순위 (기본값: BACKGROUND)
         """
-        logger.info(f"Fetching chart data for {stock_code}, interval={interval.value}")
+        logger.info(f"Fetching chart data for {stock_code}, interval={interval.value}, priority={priority.name}")
 
         if not end_date:
             end_date = datetime.now(tz=KST)
@@ -468,7 +490,7 @@ class KiwoomClient:
             "upd_stkpc_tp": "1"  # 수정주가구분: 0=미적용, 1=적용
         }
 
-        data = await self._request("POST", "/api/dostk/chart", tr_id="ka10081", json=payload)
+        data = await self._request("POST", "/api/dostk/chart", tr_id="ka10081", priority=priority, json=payload)
 
         chart_list = []
         for item in data.get("stk_dt_pole_chart_qry", []):

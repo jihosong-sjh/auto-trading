@@ -10,6 +10,7 @@ from datetime import datetime
 from ..models import Stock, Position
 from ..models.strategy import BaseStrategy
 from ..models.chart_data import ChartData
+from ..api.rate_limiter import RequestPriority
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -50,6 +51,9 @@ class GoldenCrossStrategy(BaseStrategy):
         Raises:
             ValueError: short_period >= long_period인 경우
         """
+        # 부모 클래스 초기화 (HIGH priority - 중요한 장기 전략)
+        super().__init__("GoldenCross", priority=RequestPriority.HIGH)
+
         if short_period >= long_period:
             raise ValueError("short_period must be less than long_period")
 
@@ -250,27 +254,28 @@ class GoldenCrossStrategy(BaseStrategy):
     async def calculate_position_size(
         self,
         stock: Stock,
-        available_capital: Decimal
-    ) -> int:
-        """포지션 크기 계산.
+        available_balance: float
+    ) -> Optional[int]:
+        """포지션 크기 계산 (비동기).
 
         가용 자금의 100%를 투자하되, 주식 단위로 반올림합니다.
 
         Args:
             stock: 종목 정보
-            available_capital: 가용 자금
+            available_balance: 사용 가능한 잔고
 
         Returns:
-            매수 가능 수량 (주)
+            매수 수량 (주). None이면 매수하지 않음.
 
         Example:
             >>> stock = Stock(stock_code="005930", current_price=Decimal("70000"))
-            >>> available_capital = Decimal("1000000")
-            >>> strategy.calculate_position_size(stock, available_capital)
+            >>> available_balance = 1000000.0
+            >>> await strategy.calculate_position_size(stock, available_balance)
             14  # 1,000,000 / 70,000 = 14.28... -> 14주
         """
         if stock.current_price <= 0:
             return 0
 
+        available_capital = Decimal(str(available_balance))
         quantity = int(available_capital / stock.current_price)
         return max(0, quantity)

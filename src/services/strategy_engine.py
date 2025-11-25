@@ -379,17 +379,19 @@ class StrategyEngine:
                         )
                         continue
 
-                    # 과거 100개 일봉 조회 (대부분의 전략은 20-50개면 충분)
+                    # 과거 100개 일봉 조회 (전략 priority에 따라 우선순위 부여)
                     chart_data = await client.get_chart_data(
                         stock_code=stock_code,
                         interval=ChartInterval.DAY,
-                        limit=100
+                        limit=100,
+                        priority=strategy.priority
                     )
 
                     if chart_data:
                         strategy.set_chart_data(stock_code, chart_data)
                         logger.info(
-                            f"[{strategy_name}] Loaded {len(chart_data)} candles for {stock_code}"
+                            f"[{strategy_name}] Loaded {len(chart_data)} candles for {stock_code} "
+                            f"(priority={strategy.priority.name})"
                         )
                     else:
                         logger.warning(
