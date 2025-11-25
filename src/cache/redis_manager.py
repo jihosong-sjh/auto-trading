@@ -93,8 +93,8 @@ class RedisManager:
             password=password,
             max_connections=max_connections,
             decode_responses=decode_responses,
-            socket_connect_timeout=5,
-            socket_timeout=5,
+            socket_connect_timeout=10,
+            socket_timeout=10,
             retry_on_timeout=True,
             health_check_interval=30
         )

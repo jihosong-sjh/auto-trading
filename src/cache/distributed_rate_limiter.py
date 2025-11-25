@@ -9,6 +9,8 @@ import time
 from typing import Optional, Dict, Any
 from enum import Enum
 
+from redis.exceptions import RedisError, TimeoutError as RedisTimeoutError
+
 from ..utils.logger import get_logger
 from .redis_manager import RedisManager
 
@@ -125,7 +127,7 @@ class DistributedRateLimiter:
         identifier: str,
         tokens: int = 1,
         wait: bool = False,
-        timeout: float = 5.0
+        timeout: float = 10.0
     ) -> bool:
         """Rate limit 확인 및 요청 허가.
 
@@ -150,7 +152,7 @@ class DistributedRateLimiter:
         self,
         identifier: str,
         wait: bool = False,
-        timeout: float = 5.0
+        timeout: float = 10.0
     ) -> bool:
         """Sliding Window Log 알고리즘으로 rate limit 체크.
 
@@ -200,8 +202,23 @@ class DistributedRateLimiter:
                     if wait_time > 0:
                         await asyncio.sleep(min(wait_time, 0.1))
 
+            except asyncio.TimeoutError:
+                logger.warning(f"Redis asyncio timeout for {identifier}, will retry")
+                if time.time() - start_time > timeout:
+                    await self._increment_stats(identifier, "timeout")
+                    return False
+                await asyncio.sleep(0.1)
+                continue
+            except (RedisError, RedisTimeoutError) as e:
+                logger.warning(f"Redis error for {identifier}: {e}, will retry")
+                if time.time() - start_time > timeout:
+                    await self._increment_stats(identifier, "timeout")
+                    return False
+                await asyncio.sleep(0.1)
+                continue
             except Exception as e:
-                logger.error(f"Rate limit error for {identifier}: {e}")
+                logger.error(f"Unexpected rate limit error for {identifier}: {e}")
+                await self._increment_stats(identifier, "timeout")
                 return False
 
     async def _token_bucket_acquire(
@@ -209,7 +226,7 @@ class DistributedRateLimiter:
         identifier: str,
         tokens: int = 1,
         wait: bool = False,
-        timeout: float = 5.0
+        timeout: float = 10.0
     ) -> bool:
         """Token Bucket 알고리즘으로 rate limit 체크.
 
@@ -259,8 +276,23 @@ class DistributedRateLimiter:
                     wait_time = tokens / refill_rate
                     await asyncio.sleep(min(wait_time, 0.1))
 
+            except asyncio.TimeoutError:
+                logger.warning(f"Redis asyncio timeout for {identifier}, will retry")
+                if time.time() - start_time > timeout:
+                    await self._increment_stats(identifier, "timeout")
+                    return False
+                await asyncio.sleep(0.1)
+                continue
+            except (RedisError, RedisTimeoutError) as e:
+                logger.warning(f"Redis error for {identifier}: {e}, will retry")
+                if time.time() - start_time > timeout:
+                    await self._increment_stats(identifier, "timeout")
+                    return False
+                await asyncio.sleep(0.1)
+                continue
             except Exception as e:
-                logger.error(f"Token bucket error for {identifier}: {e}")
+                logger.error(f"Unexpected token bucket error for {identifier}: {e}")
+                await self._increment_stats(identifier, "timeout")
                 return False
 
     async def _calculate_wait_time(self, identifier: str) -> float:
@@ -481,7 +513,7 @@ class PriorityRateLimiter(DistributedRateLimiter):
         priority: str = "low",
         tokens: int = 1,
         wait: bool = False,
-        timeout: float = 5.0
+        timeout: float = 10.0
     ) -> bool:
         """우선순위 기반 rate limit 체크.
 
