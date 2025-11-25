@@ -23,6 +23,13 @@ from ..services.risk_monitor import RiskMonitor
 from ..services.strategy_engine import StrategyEngine
 from ..utils.logger import get_logger
 
+# WebSocket 실시간 데이터 수집기
+try:
+    from ..services.websocket_data_collector import WebSocketDataCollector
+    WEBSOCKET_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+
 # TimescaleDB 관련 임포트
 try:
     from ..timeseries.database import TimeSeriesDB
@@ -70,6 +77,8 @@ class TradingSystem:
 
         # Asyncio primitives for coordination
         self.market_data_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self.order_book_queue: asyncio.Queue = asyncio.Queue(maxsize=500)  # 0D 호가 데이터
+        self.order_event_queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # 00/04 주문/잔고
         self.order_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         self.shutdown_event: asyncio.Event = asyncio.Event()
 
@@ -247,12 +256,43 @@ class TradingSystem:
         # Store client reference for cleanup
         self.client = client
 
-        # Initialize services
-        self.data_collector = DataCollector(
-            config=self.config,
-            client=client,
-            market_data_queue=self.market_data_queue
+        # Initialize data collector (WebSocket or REST polling)
+        use_websocket = (
+            getattr(self.config, "websocket_enabled", True)
+            and WEBSOCKET_AVAILABLE
+            and mode != "simulator"  # 시뮬레이터 모드에서는 REST 폴링 사용
         )
+
+        if use_websocket:
+            self.data_collector = WebSocketDataCollector(
+                config=self.config,
+                kiwoom_client=client,
+                market_data_queue=self.market_data_queue,
+                order_book_queue=self.order_book_queue,
+                order_event_queue=self.order_event_queue,
+                stock_codes=list(self.config.watch_symbols),
+                fallback_to_rest=getattr(self.config, "websocket_fallback_to_rest", True),
+            )
+            logger.info(
+                "Initialized WebSocket data collector "
+                f"(stocks={len(self.config.watch_symbols)}, "
+                f"fallback_to_rest={getattr(self.config, 'websocket_fallback_to_rest', True)})"
+            )
+        else:
+            self.data_collector = DataCollector(
+                config=self.config,
+                client=client,
+                market_data_queue=self.market_data_queue
+            )
+            if mode == "simulator":
+                logger.info("Initialized REST data collector (simulator mode)")
+            elif not WEBSOCKET_AVAILABLE:
+                logger.warning(
+                    "WebSocket not available (missing dependencies), "
+                    "falling back to REST polling"
+                )
+            else:
+                logger.info("Initialized REST data collector (websocket_enabled=False)")
 
         # Initialize OrderExecutor first (StrategyEngine will need it)
         self.order_executor = OrderExecutor(
@@ -456,19 +496,22 @@ class TradingSystem:
                 logger.info("API client connection closed")
 
         # Clear queues
-        while not self.market_data_queue.empty():
-            try:
-                self.market_data_queue.get_nowait()
-                self.market_data_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
-
-        while not self.order_queue.empty():
-            try:
-                self.order_queue.get_nowait()
-                self.order_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
+        for queue_name, queue in [
+            ("market_data_queue", self.market_data_queue),
+            ("order_book_queue", self.order_book_queue),
+            ("order_event_queue", self.order_event_queue),
+            ("order_queue", self.order_queue),
+        ]:
+            count = 0
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                    queue.task_done()
+                    count += 1
+                except asyncio.QueueEmpty:
+                    break
+            if count > 0:
+                logger.debug(f"Cleared {count} items from {queue_name}")
 
         # Prometheus exporter 종료
         if self.prometheus_exporter:

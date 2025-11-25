@@ -160,6 +160,15 @@ from .notification import Notification
 from .system_status import SystemStatus
 from .strategy import BaseStrategy
 from .order_book import OrderBook, OrderBookLevel
+from .realtime_data import (
+    TradeData,
+    OrderBookData,
+    OrderExecutionData,
+    BalanceUpdateData,
+    MarketPhase as RealTimeMarketPhase,
+    OrderStatus as RealTimeOrderStatus,
+    BalanceAction,
+)
 
 __all__ = [
     # Enums
@@ -182,4 +191,12 @@ __all__ = [
     "BaseStrategy",
     "OrderBook",
     "OrderBookLevel",
+    # Real-time data models (WebSocket)
+    "TradeData",
+    "OrderBookData",
+    "OrderExecutionData",
+    "BalanceUpdateData",
+    "RealTimeMarketPhase",
+    "RealTimeOrderStatus",
+    "BalanceAction",
 ]

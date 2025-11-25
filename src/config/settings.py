@@ -214,6 +214,36 @@ class Settings(BaseSettings):
         description="스마트 폴링 활성화 여부 - 포지션 보유 종목 우선 폴링"
     )
 
+    # WebSocket 설정
+    websocket_enabled: bool = Field(
+        default=True,
+        description="WebSocket 실시간 시세 활성화 여부"
+    )
+    websocket_url: Optional[str] = Field(
+        default=None,
+        description="WebSocket URL (미지정 시 trading_mode에 따라 자동 선택)"
+    )
+    websocket_heartbeat_interval: float = Field(
+        default=30.0,
+        description="WebSocket 하트비트 간격 (초)"
+    )
+    websocket_reconnect_delay: float = Field(
+        default=1.0,
+        description="WebSocket 초기 재연결 대기 시간 (초)"
+    )
+    websocket_max_reconnect_delay: float = Field(
+        default=60.0,
+        description="WebSocket 최대 재연결 대기 시간 (초)"
+    )
+    websocket_fallback_to_rest: bool = Field(
+        default=True,
+        description="WebSocket 실패 시 REST 폴링으로 폴백"
+    )
+    websocket_subscribe_types: List[str] = Field(
+        default_factory=lambda: ["0B", "0D"],
+        description="WebSocket 구독 타입 (0B: 체결, 0D: 호가)"
+    )
+
     # 전략 및 종목 설정
     watch_symbols: List[str] = Field(
         default_factory=lambda: ["005930", "000660", "035420", "051910"],
