@@ -547,7 +547,7 @@ class KiwoomClient:
             "trde_tp": trde_tp
         }
 
-        data = await self._request("POST", "/api/dostk/ordr", json=payload)
+        data = await self._request("POST", "/api/dostk/ordr", tr_id=tr_cd, json=payload)
 
         # Check return code
         return_code = data.get("return_code", "0")

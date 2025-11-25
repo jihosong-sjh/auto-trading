@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Dict, Optional, Protocol, Union
 from zoneinfo import ZoneInfo
 
+from ..api.exceptions import RateLimitExceededError
 from ..models import OrderStatus, OrderType
 from ..models.account import Account
 from ..models.order import Order
@@ -160,8 +161,8 @@ class OrderExecutor:
                 logger.warning(error_msg)
                 return False, error_msg, None
 
-            # 3. 계좌 정보 조회
-            account = await self.client.get_account()
+            # 3. 계좌 정보 조회 (Rate Limit 재시도 로직 포함)
+            account = await self._get_account_with_retry(max_retries=3)
 
             # T086: 4. 위험 관리 검증 (주문 전)
             should_stop, risk_message = self.risk_manager.should_stop_trading(
@@ -265,6 +266,14 @@ class OrderExecutor:
                 )
                 return True, None, filled_order
 
+        except RateLimitExceededError as e:
+            error_msg = f"Rate Limit 초과로 주문 실패: {str(e)}"
+            logger.error(error_msg)
+            order.status = OrderStatus.FAILED
+            order.error_message = error_msg
+            self.pending_orders.pop(order.order_id, None)
+            return False, error_msg, None
+
         except Exception as e:
             error_msg = f"주문 실행 중 예외 발생: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -347,6 +356,38 @@ class OrderExecutor:
             order for order in self.pending_orders.values()
             if order.stock_code == stock_code
         ]
+
+    async def _get_account_with_retry(self, max_retries: int = 3) -> Account:
+        """Rate Limit을 고려한 계좌 정보 조회 (재시도 로직 포함).
+
+        Args:
+            max_retries: 최대 재시도 횟수.
+
+        Returns:
+            Account: 계좌 정보.
+
+        Raises:
+            RateLimitExceededError: 최대 재시도 후에도 Rate Limit 발생 시.
+            Exception: 기타 API 오류 발생 시.
+        """
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                return await self.client.get_account()
+            except RateLimitExceededError as e:
+                last_exception = e
+                wait_time = 2 ** attempt  # 지수 백오프: 1초, 2초, 4초
+                logger.warning(
+                    f"Rate Limit 발생, {wait_time}초 후 재시도 "
+                    f"(시도 {attempt + 1}/{max_retries})"
+                )
+                await asyncio.sleep(wait_time)
+
+        # 모든 재시도 실패
+        raise last_exception or RateLimitExceededError(
+            "계좌 조회 Rate Limit 초과 (최대 재시도 횟수 도달)"
+        )
 
     async def _update_account_on_fill(self, filled_order: Order) -> Optional[Decimal]:
         """주문 체결 시 계좌 상태를 자동으로 업데이트합니다 (T071).
