@@ -4,12 +4,13 @@
 
 import { useDashboardWebSocket } from './hooks/useWebSocket';
 import { ConnectionStatus } from './components/ConnectionStatus';
+import { PendingOrders } from './components/PendingOrders';
 import { PortfolioSummary } from './components/PortfolioSummary';
 import { PositionTable } from './components/PositionTable';
 import { TradeHistory } from './components/TradeHistory';
 
 function App() {
-  const { positions, portfolio, trades, connectionStatus } = useDashboardWebSocket();
+  const { positions, portfolio, trades, pendingOrders, connectionStatus } = useDashboardWebSocket();
 
   return (
     <div className="min-h-screen">
@@ -45,6 +46,11 @@ function App() {
               <h2 className="text-lg font-semibold text-slate-800">자산 현황</h2>
             </div>
             <PortfolioSummary portfolio={portfolio} />
+          </section>
+
+          {/* Pending Orders */}
+          <section>
+            <PendingOrders orders={pendingOrders} />
           </section>
 
           {/* Positions */}

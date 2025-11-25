@@ -17,6 +17,8 @@ class WSMessageType(str, Enum):
     TRADE_EXECUTED = "trade_executed"
     PRICE_UPDATE = "price_update"
     CONNECTION_STATUS = "connection_status"
+    PENDING_ORDERS_UPDATE = "pending_orders_update"  # 진행 중인 주문 업데이트
+    ORDER_STATUS_CHANGED = "order_status_changed"  # 개별 주문 상태 변경
 
 
 class DashboardPosition(BaseModel):
@@ -112,6 +114,7 @@ class DashboardSnapshot(BaseModel):
     positions: List[DashboardPosition] = Field(default_factory=list)
     portfolio: DashboardPortfolio
     trades_today: List[DashboardTrade] = Field(default_factory=list)
+    pending_orders: List["DashboardPendingOrder"] = Field(default_factory=list)
 
     class Config:
         json_encoders = {Decimal: str, datetime: lambda v: v.isoformat()}
@@ -142,6 +145,53 @@ class TradeExecutedData(BaseModel):
     filled_at: datetime
     strategy_name: Optional[str] = None
     realized_pnl: Optional[Decimal] = None
+
+    class Config:
+        json_encoders = {Decimal: str, datetime: lambda v: v.isoformat()}
+
+
+class DashboardPendingOrder(BaseModel):
+    """Pending order for dashboard display."""
+
+    order_id: str = Field(..., description="Order ID")
+    stock_code: str = Field(..., description="Stock code")
+    stock_name: str = Field(default="", description="Stock name")
+    order_type: str = Field(..., description="BUY or SELL")
+    price_type: str = Field(..., description="LIMIT or MARKET")
+    quantity: int = Field(..., gt=0, description="Order quantity")
+    limit_price: Optional[Decimal] = Field(None, description="Limit price (for LIMIT orders)")
+    filled_quantity: int = Field(default=0, ge=0, description="Filled quantity")
+    filled_price: Optional[Decimal] = Field(None, description="Average filled price")
+    status: str = Field(..., description="Order status")
+    strategy_name: Optional[str] = Field(None, description="Strategy name")
+    submitted_at: Optional[datetime] = Field(None, description="Submission time")
+    created_at: datetime = Field(..., description="Creation time")
+
+    @computed_field
+    @property
+    def fill_rate(self) -> Decimal:
+        """Fill rate percentage (filled_quantity / quantity * 100)."""
+        if self.quantity == 0:
+            return Decimal("0")
+        return Decimal(self.filled_quantity) / Decimal(self.quantity) * 100
+
+    class Config:
+        json_encoders = {Decimal: str, datetime: lambda v: v.isoformat()}
+
+
+class OrderStatusChangedData(BaseModel):
+    """Data for order status change message."""
+
+    order_id: str
+    stock_code: str
+    stock_name: str
+    order_type: str
+    status: str
+    previous_status: str
+    quantity: int
+    filled_quantity: int
+    filled_price: Optional[Decimal] = None
+    changed_at: datetime
 
     class Config:
         json_encoders = {Decimal: str, datetime: lambda v: v.isoformat()}

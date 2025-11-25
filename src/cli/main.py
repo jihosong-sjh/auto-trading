@@ -50,6 +50,7 @@ except ImportError:
 try:
     from ..cache.redis_manager import RedisManager
     from ..dashboard.services.data_publisher import DashboardDataPublisher
+    from ..services.stock_info_cache import StockInfoCache
     DASHBOARD_AVAILABLE = True
 except ImportError:
     DASHBOARD_AVAILABLE = False
@@ -387,11 +388,17 @@ class TradingSystem:
                     f"for dashboard data publishing"
                 )
 
+                # StockInfoCache 초기화 (종목명 캐시)
+                stock_info_cache = StockInfoCache(client=client)
+                logger.info("StockInfoCache initialized for dashboard")
+
                 # DashboardDataPublisher 초기화
                 self.dashboard_publisher = DashboardDataPublisher(
                     redis_manager=self.redis_manager,
                     positions=self.positions,
                     account=None,  # Account will be updated dynamically
+                    pending_orders=self.pending_orders,  # pending orders for status tracking
+                    stock_info_cache=stock_info_cache,  # stock name lookup
                     publish_interval=self.config.dashboard_update_interval
                 )
 
@@ -401,7 +408,8 @@ class TradingSystem:
 
                 logger.info(
                     f"DashboardDataPublisher initialized "
-                    f"(update_interval={self.config.dashboard_update_interval}s)"
+                    f"(update_interval={self.config.dashboard_update_interval}s, "
+                    f"stock_name_cache=enabled, pending_orders=enabled)"
                 )
 
             except Exception as e:

@@ -21,6 +21,7 @@ from ..models import (
     DashboardPortfolio,
     DashboardTrade,
     DashboardSnapshot,
+    DashboardPendingOrder,
     WSMessageType,
 )
 
@@ -57,11 +58,14 @@ class DashboardDataSubscriber:
     CHANNEL_POSITION_UPDATE = "position_update"
     CHANNEL_PORTFOLIO_UPDATE = "portfolio_update"
     CHANNEL_TRADE_EXECUTED = "trade_executed"
+    CHANNEL_PENDING_ORDERS_UPDATE = "pending_orders_update"
+    CHANNEL_ORDER_STATUS_CHANGED = "order_status_changed"
 
     # State keys (without shared_state: prefix)
     STATE_POSITIONS = "dashboard:positions"
     STATE_PORTFOLIO = "dashboard:portfolio"
     STATE_TRADES_TODAY = "dashboard:trades_today"
+    STATE_PENDING_ORDERS = "dashboard:pending_orders"
 
     def __init__(self, redis_manager: RedisManager):
         """Initialize DashboardDataSubscriber.
@@ -95,9 +99,17 @@ class DashboardDataSubscriber:
             self.CHANNEL_TRADE_EXECUTED,
             self._on_trade_executed,
         )
+        await self.shared_data.subscribe(
+            self.CHANNEL_PENDING_ORDERS_UPDATE,
+            self._on_pending_orders_update,
+        )
+        await self.shared_data.subscribe(
+            self.CHANNEL_ORDER_STATUS_CHANGED,
+            self._on_order_status_changed,
+        )
 
         self._running = True
-        logger.info("DashboardDataSubscriber started")
+        logger.info("DashboardDataSubscriber started (5 channels)")
 
     async def stop(self) -> None:
         """Stop the subscriber and disconnect all clients."""
@@ -162,11 +174,13 @@ class DashboardDataSubscriber:
         positions = await self.get_positions()
         portfolio = await self.get_portfolio()
         trades = await self.get_trades_today()
+        pending_orders = await self.get_pending_orders()
 
         return {
             "positions": positions,
             "portfolio": portfolio,
             "trades_today": trades,
+            "pending_orders": pending_orders,
         }
 
     async def get_positions(self) -> List[Dict[str, Any]]:
@@ -209,6 +223,15 @@ class DashboardDataSubscriber:
         trades = await self.shared_data.get_state(self.STATE_TRADES_TODAY, [])
         return trades if trades else []
 
+    async def get_pending_orders(self) -> List[Dict[str, Any]]:
+        """Get pending orders from Redis.
+
+        Returns:
+            List of pending order dicts
+        """
+        pending_orders = await self.shared_data.get_state(self.STATE_PENDING_ORDERS, [])
+        return pending_orders if pending_orders else []
+
     async def _on_position_update(self, message: Dict[str, Any]) -> None:
         """Handle position update from Redis.
 
@@ -230,6 +253,22 @@ class DashboardDataSubscriber:
 
         Args:
             message: Trade executed message
+        """
+        await self._broadcast(message)
+
+    async def _on_pending_orders_update(self, message: Dict[str, Any]) -> None:
+        """Handle pending orders update from Redis.
+
+        Args:
+            message: Pending orders update message
+        """
+        await self._broadcast(message)
+
+    async def _on_order_status_changed(self, message: Dict[str, Any]) -> None:
+        """Handle order status changed from Redis.
+
+        Args:
+            message: Order status changed message
         """
         await self._broadcast(message)
 

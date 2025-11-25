@@ -112,6 +112,10 @@ body {
 .section-trade .section-header-icon { background: var(--color-trade-border); }
 .section-trade .section-header { border-bottom-color: #d1fae5; background: linear-gradient(90deg, #ecfdf5 0%, #ffffff 100%); }
 
+/* Pending Orders Section */
+.section-pending .section-header-icon { background: #8b5cf6; }
+.section-pending .section-header { border-bottom-color: #ede9fe; background: linear-gradient(90deg, #f5f3ff 0%, #ffffff 100%); }
+
 /* ========================================
    Summary Card Styles
    ======================================== */

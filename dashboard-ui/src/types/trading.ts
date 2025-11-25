@@ -38,10 +38,41 @@ export interface Trade {
   realized_pnl: string | null;
 }
 
+export interface PendingOrder {
+  order_id: string;
+  stock_code: string;
+  stock_name: string;
+  order_type: 'BUY' | 'SELL';
+  price_type: 'LIMIT' | 'MARKET';
+  quantity: number;
+  limit_price: string | null;
+  filled_quantity: number;
+  filled_price: string | null;
+  fill_rate: string;
+  status: string;
+  strategy_name: string | null;
+  submitted_at: string | null;
+  created_at: string;
+}
+
+export interface OrderStatusChangedData {
+  order_id: string;
+  stock_code: string;
+  stock_name: string;
+  order_type: 'BUY' | 'SELL';
+  status: string;
+  previous_status: string;
+  quantity: number;
+  filled_quantity: number;
+  filled_price: string | null;
+  changed_at: string;
+}
+
 export interface DashboardSnapshot {
   positions: Position[];
   portfolio: Portfolio;
   trades_today: Trade[];
+  pending_orders: PendingOrder[];
 }
 
 export type WSMessageType =
@@ -51,6 +82,8 @@ export type WSMessageType =
   | 'trade_executed'
   | 'price_update'
   | 'connection_status'
+  | 'pending_orders_update'
+  | 'order_status_changed'
   | 'ping';
 
 export interface WSMessage {

@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ConnectionStatus,
   DashboardSnapshot,
+  OrderStatusChangedData,
+  PendingOrder,
   Portfolio,
   Position,
   PositionUpdateData,
@@ -25,6 +27,7 @@ interface UseDashboardWebSocketReturn {
   positions: Position[];
   portfolio: Portfolio | null;
   trades: Trade[];
+  pendingOrders: PendingOrder[];
   connectionStatus: ConnectionStatus;
 }
 
@@ -32,6 +35,7 @@ export function useDashboardWebSocket(): UseDashboardWebSocketReturn {
   const [positions, setPositions] = useState<Position[]>([]);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     connected: false,
     lastUpdate: null,
@@ -124,6 +128,7 @@ export function useDashboardWebSocket(): UseDashboardWebSocketReturn {
         setPositions(snapshot.positions);
         setPortfolio(snapshot.portfolio);
         setTrades(snapshot.trades_today);
+        setPendingOrders(snapshot.pending_orders || []);
         break;
       }
 
@@ -154,6 +159,30 @@ export function useDashboardWebSocket(): UseDashboardWebSocketReturn {
       case 'trade_executed': {
         const trade = message.data as Trade;
         setTrades((prev) => [trade, ...prev]);
+        break;
+      }
+
+      case 'pending_orders_update': {
+        const orders = message.data as PendingOrder[];
+        setPendingOrders(orders);
+        break;
+      }
+
+      case 'order_status_changed': {
+        const statusChange = message.data as OrderStatusChangedData;
+        // Update specific order in pending orders list
+        setPendingOrders((prev) =>
+          prev.map((order) =>
+            order.order_id === statusChange.order_id
+              ? {
+                  ...order,
+                  status: statusChange.status,
+                  filled_quantity: statusChange.filled_quantity,
+                  filled_price: statusChange.filled_price,
+                }
+              : order
+          )
+        );
         break;
       }
 
@@ -188,6 +217,7 @@ export function useDashboardWebSocket(): UseDashboardWebSocketReturn {
     positions,
     portfolio,
     trades,
+    pendingOrders,
     connectionStatus,
   };
 }
