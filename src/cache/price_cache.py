@@ -219,6 +219,10 @@ class RedisPriceCache:
 
             prev_price = prev_data["price"]
 
+            # 가격이 문자열이면 숫자로 변환
+            if isinstance(prev_price, str):
+                prev_price = float(prev_price)
+
             # 가격 변화율 계산
             if prev_price > 0:
                 change_rate = abs((current_price - prev_price) / prev_price * 100)
@@ -293,8 +297,16 @@ class RedisPriceCache:
             if len(history) < 2:
                 return
 
-            # 가격 변동성 계산
-            prices = [item["price"] for item in history if "price" in item]
+            # 가격 변동성 계산 (문자열 -> 숫자 변환)
+            prices = []
+            for item in history:
+                if "price" in item:
+                    price = item["price"]
+                    # 문자열이면 숫자로 변환
+                    if isinstance(price, str):
+                        price = float(price)
+                    prices.append(price)
+
             if len(prices) < 2:
                 return
 
@@ -462,10 +474,12 @@ class RedisPriceCache:
                 cursor, keys = await self.redis.client.scan(cursor, match=pattern, count=100)
 
                 for key in keys:
-                    hits = await self.redis.get(key.decode() if isinstance(key, bytes) else key)
+                    # 키를 한 번만 디코드
+                    key_str = key.decode() if isinstance(key, bytes) else key
+                    hits = await self.redis.get(key_str)
                     if hits:
-                        # 키에서 종목코드 추출
-                        stock_code = key.decode().split(":")[2].split(":")[0]
+                        # 키에서 종목코드 추출 (이미 디코드된 key_str 사용)
+                        stock_code = key_str.split(":")[2]
                         stock_hits.append((stock_code, int(hits)))
 
                 if cursor == 0:

@@ -389,13 +389,19 @@ class StaggeredPricePoller:
                         if cached_data:
                             # Redis 캐시 히트
                             from ..models import Stock
+                            from decimal import Decimal
+
+                            # 가격 데이터 타입 변환 (문자열 -> 숫자)
+                            price = cached_data.get("price", 0)
+                            if isinstance(price, str):
+                                price = float(price)
+
                             stock = Stock(
-                                code=stock_code,
-                                name=cached_data.get("name", ""),
-                                current_price=cached_data.get("price", 0),
-                                change=cached_data.get("change", 0),
-                                change_rate=cached_data.get("change_rate", 0),
-                                volume=cached_data.get("volume", 0)
+                                stock_code=stock_code,
+                                stock_name=cached_data.get("name", f"Stock_{stock_code}"),
+                                market=cached_data.get("market", "KOSPI"),
+                                current_price=Decimal(str(price)),
+                                volume=int(cached_data.get("volume", 0))
                             )
                             await self.market_data_queue.put(stock)
                             logger.debug(f"[REDIS HIT] {stock_code}: {stock.current_price:,.0f}")
@@ -403,11 +409,12 @@ class StaggeredPricePoller:
                             # Redis 캐시 미스: API 호출 후 Redis에 저장
                             stock = await self.client.get_stock_price(stock_code)
 
-                            # Redis에 저장 (Decimal을 문자열로 변환)
+                            # Redis에 저장 (숫자로 저장)
                             price_data = {
                                 "code": stock_code,
                                 "name": stock.stock_name,
-                                "price": str(stock.current_price),  # Decimal -> str
+                                "market": stock.market.value if hasattr(stock.market, 'value') else str(stock.market),
+                                "price": float(stock.current_price),  # Decimal -> float (not string!)
                                 "volume": stock.volume
                             }
                             await redis_cache.set(stock_code, price_data, write_through=True)

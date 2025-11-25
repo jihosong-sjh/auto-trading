@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from datetime import datetime
 
 from ..utils.logger import get_logger
-from .redis_manager import RedisManager
+from .redis_manager import RedisManager, _safe_decode
 
 logger = get_logger(__name__)
 
@@ -266,15 +266,15 @@ class SharedDataManager:
         try:
             async for message in self.pubsub.listen():
                 if message["type"] == "message":
-                    # 채널에서 프리픽스 제거
-                    channel = message["channel"].decode()
+                    # 채널에서 프리픽스 제거 (안전한 디코드 사용)
+                    channel = _safe_decode(message["channel"])
                     channel = channel.replace(self.pubsub_prefix, "")
 
                     # 메시지 디시리얼라이즈
                     try:
                         data = json.loads(message["data"])
                     except (json.JSONDecodeError, TypeError):
-                        data = message["data"].decode() if isinstance(message["data"], bytes) else message["data"]
+                        data = _safe_decode(message["data"])
 
                     # 콜백 실행
                     if channel in self.subscriptions:
@@ -510,8 +510,8 @@ class SharedDataManager:
             cursor, keys = await self.redis.client.scan(cursor, match=pattern, count=100)
 
             for key in keys:
-                # 키에서 프로세스 ID 추출
-                key_str = key.decode() if isinstance(key, bytes) else key
+                # 키에서 프로세스 ID 추출 (안전한 디코드 사용)
+                key_str = _safe_decode(key)
                 process_id = key_str.replace(self.heartbeat_prefix, "")
                 alive_processes.append(process_id)
 

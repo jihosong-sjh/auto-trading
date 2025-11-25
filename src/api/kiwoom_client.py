@@ -251,7 +251,27 @@ class KiwoomClient:
                 # Success response (2xx status codes)
                 if response.is_success:
                     try:
-                        json_data = response.json()
+                        # Handle Korean encoding (EUC-KR/cp949) from Mock API
+                        # Always decode manually to handle various encodings
+                        import json
+
+                        json_data = None
+                        content = response.content
+
+                        # Try common encodings in order of likelihood
+                        for encoding in ['utf-8', 'euc-kr', 'cp949']:
+                            try:
+                                text = content.decode(encoding)
+                                json_data = json.loads(text)
+                                if encoding != 'utf-8':
+                                    logger.debug(f"Decoded response with {encoding} encoding")
+                                break
+                            except (UnicodeDecodeError, json.JSONDecodeError):
+                                continue
+
+                        if json_data is None:
+                            # If all encodings fail, raise error
+                            raise ValueError(f"Failed to decode response with any encoding. Content: {content[:100]}")
 
                         # Check Kiwoom-specific return_code in response body
                         # return_code: 0 = success, non-zero = error
@@ -275,13 +295,21 @@ class KiwoomClient:
 
                 # Error response - try to parse error details
                 error_data = {}
-                if "application/json" in response.headers.get("content-type", ""):
-                    try:
-                        error_data = response.json()
-                    except Exception as e:
-                        logger.warning(f"Failed to parse error response as JSON: {e}")
+                error_text = ""
 
-                error_message = error_data.get("message", response.text)
+                # Try to decode error response with multiple encodings
+                import json
+                content = response.content
+                for encoding in ['utf-8', 'euc-kr', 'cp949']:
+                    try:
+                        error_text = content.decode(encoding)
+                        if "application/json" in response.headers.get("content-type", ""):
+                            error_data = json.loads(error_text)
+                        break
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+
+                error_message = error_data.get("message", error_text)
                 error_code = str(error_data.get("error_code", ""))
 
                 # Handle Kiwoom-specific error codes (T059)

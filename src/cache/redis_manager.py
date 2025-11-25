@@ -17,6 +17,36 @@ from ..utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _safe_decode(value: Any, encoding: str = 'utf-8') -> Any:
+    """바이트를 안전하게 디코드.
+
+    Args:
+        value: 디코드할 값
+        encoding: 사용할 인코딩 (기본: utf-8)
+
+    Returns:
+        디코드된 문자열 또는 원본 값
+    """
+    if not isinstance(value, bytes):
+        return value
+
+    try:
+        return value.decode(encoding)
+    except UnicodeDecodeError as e:
+        logger.warning(
+            f"UTF-8 decode failed, trying latin-1 fallback: {e}"
+        )
+        try:
+            # latin-1은 모든 바이트 값을 허용하므로 실패하지 않음
+            return value.decode('latin-1')
+        except Exception as fallback_error:
+            logger.error(
+                f"All decode attempts failed: {fallback_error}, "
+                f"returning raw bytes"
+            )
+            return value
+
+
 class RedisManager:
     """Redis 연결 관리 및 기본 캐시 작업.
 
@@ -140,16 +170,23 @@ class RedisManager:
             if value is None:
                 return default
 
+            # bytes를 먼저 UTF-8로 디코딩 시도
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode('utf-8')
+                except UnicodeDecodeError:
+                    # UTF-8 디코딩 실패 시 pickle 데이터로 간주
+                    try:
+                        return pickle.loads(value)
+                    except (pickle.PickleError, TypeError):
+                        return _safe_decode(value)
+
             # JSON 디시리얼라이즈 시도
             try:
                 return json.loads(value)
             except (json.JSONDecodeError, TypeError):
-                # Pickle 디시리얼라이즈 시도
-                try:
-                    return pickle.loads(value)
-                except (pickle.PickleError, TypeError):
-                    # 원본 반환
-                    return value.decode() if isinstance(value, bytes) else value
+                # JSON 파싱 실패 시 원본 문자열 반환
+                return value
 
         except RedisError as e:
             logger.error(f"Redis get error for key '{key}': {e}")
@@ -185,7 +222,8 @@ class RedisManager:
             else:
                 # 복잡한 객체는 JSON 또는 Pickle로 직렬화
                 try:
-                    serialized = json.dumps(value, ensure_ascii=False)
+                    # ensure_ascii=True로 한글을 유니코드 이스케이프 처리하여 UTF-8 디코딩 문제 방지
+                    serialized = json.dumps(value, ensure_ascii=True)
                 except (TypeError, ValueError):
                     serialized = pickle.dumps(value)
 
@@ -302,14 +340,24 @@ class RedisManager:
                 if value is None:
                     result.append(None)
                 else:
+                    # bytes를 먼저 UTF-8로 디코딩 시도
+                    if isinstance(value, bytes):
+                        try:
+                            value = value.decode('utf-8')
+                        except UnicodeDecodeError:
+                            # UTF-8 디코딩 실패 시 pickle 데이터로 간주
+                            try:
+                                result.append(pickle.loads(value))
+                                continue
+                            except (pickle.PickleError, TypeError):
+                                result.append(_safe_decode(value))
+                                continue
+
                     # 디시리얼라이즈
                     try:
                         result.append(json.loads(value))
                     except (json.JSONDecodeError, TypeError):
-                        try:
-                            result.append(pickle.loads(value))
-                        except (pickle.PickleError, TypeError):
-                            result.append(value.decode() if isinstance(value, bytes) else value)
+                        result.append(value)
 
             return result
 
@@ -338,7 +386,8 @@ class RedisManager:
                     serialized[key] = value
                 else:
                     try:
-                        serialized[key] = json.dumps(value, ensure_ascii=False)
+                        # ensure_ascii=True로 한글을 유니코드 이스케이프 처리하여 UTF-8 디코딩 문제 방지
+                        serialized[key] = json.dumps(value, ensure_ascii=True)
                     except (TypeError, ValueError):
                         serialized[key] = pickle.dumps(value)
 
@@ -420,7 +469,8 @@ class RedisManager:
                 if isinstance(value, (str, bytes, int, float)):
                     serialized.append(value)
                 else:
-                    serialized.append(json.dumps(value, ensure_ascii=False))
+                    # ensure_ascii=True로 한글을 유니코드 이스케이프 처리하여 UTF-8 디코딩 문제 방지
+                    serialized.append(json.dumps(value, ensure_ascii=True))
 
             return await self.client.lpush(key, *serialized)
 
@@ -447,10 +497,18 @@ class RedisManager:
             result = []
 
             for value in values:
+                # bytes를 먼저 UTF-8로 디코딩 시도
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8')
+                    except UnicodeDecodeError:
+                        result.append(_safe_decode(value))
+                        continue
+
                 try:
                     result.append(json.loads(value))
                 except (json.JSONDecodeError, TypeError):
-                    result.append(value.decode() if isinstance(value, bytes) else value)
+                    result.append(value)
 
             return result
 
@@ -479,7 +537,8 @@ class RedisManager:
                 if isinstance(value, (str, bytes, int, float)):
                     serialized.append(value)
                 else:
-                    serialized.append(json.dumps(value, ensure_ascii=False))
+                    # ensure_ascii=True로 한글을 유니코드 이스케이프 처리하여 UTF-8 디코딩 문제 방지
+                    serialized.append(json.dumps(value, ensure_ascii=True))
 
             return await self.client.sadd(key, *serialized)
 
@@ -504,10 +563,18 @@ class RedisManager:
             result = set()
 
             for value in values:
+                # bytes를 먼저 UTF-8로 디코딩 시도
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8')
+                    except UnicodeDecodeError:
+                        result.add(_safe_decode(value))
+                        continue
+
                 try:
                     result.add(json.loads(value))
                 except (json.JSONDecodeError, TypeError):
-                    result.add(value.decode() if isinstance(value, bytes) else value)
+                    result.add(value)
 
             return result
 
@@ -535,7 +602,8 @@ class RedisManager:
             if isinstance(value, (str, bytes, int, float)):
                 serialized = value
             else:
-                serialized = json.dumps(value, ensure_ascii=False)
+                # ensure_ascii=True로 한글을 유니코드 이스케이프 처리하여 UTF-8 디코딩 문제 방지
+                serialized = json.dumps(value, ensure_ascii=True)
 
             return await self.client.hset(key, field, serialized)
 
@@ -561,10 +629,17 @@ class RedisManager:
             if value is None:
                 return None
 
+            # bytes를 먼저 UTF-8로 디코딩 시도
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode('utf-8')
+                except UnicodeDecodeError:
+                    return _safe_decode(value)
+
             try:
                 return json.loads(value)
             except (json.JSONDecodeError, TypeError):
-                return value.decode() if isinstance(value, bytes) else value
+                return value
 
         except RedisError as e:
             logger.error(f"Redis hget error for key '{key}', field '{field}': {e}")
@@ -587,11 +662,24 @@ class RedisManager:
             result = {}
 
             for field, value in data.items():
-                field_str = field.decode() if isinstance(field, bytes) else field
+                # field를 UTF-8로 디코딩
+                if isinstance(field, bytes):
+                    field_str = field.decode('utf-8')
+                else:
+                    field_str = field
+
+                # value를 UTF-8로 디코딩 시도
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8')
+                    except UnicodeDecodeError:
+                        result[field_str] = _safe_decode(value)
+                        continue
+
                 try:
                     result[field_str] = json.loads(value)
                 except (json.JSONDecodeError, TypeError):
-                    result[field_str] = value.decode() if isinstance(value, bytes) else value
+                    result[field_str] = value
 
             return result
 
