@@ -542,8 +542,8 @@ class KiwoomClient:
             "tr_cd": tr_cd,
             "acnt_no": self.account_number,
             "stk_cd": order.stock_code,
-            "ord_qty": order.quantity,
-            "ord_uv": ord_uv,
+            "ord_qty": str(order.quantity),  # API requires string type
+            "ord_uv": str(ord_uv),  # API requires string type
             "trde_tp": trde_tp,
             "dmst_stex_tp": "KRX"  # 국내거래소구분: KRX(한국거래소), NXT(넥스트레이드), SOR
         }
