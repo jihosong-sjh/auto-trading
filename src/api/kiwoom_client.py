@@ -523,12 +523,15 @@ class KiwoomClient:
         - 0: 보통/지정가
         - 3: 시장가
         """
-        logger.info(f"Submitting order: {order.order_type.value} {order.quantity} shares of {order.stock_code}")
+        # use_enum_values=True로 인해 order_type이 문자열일 수 있음
+        order_type_value = order.order_type.value if isinstance(order.order_type, OrderType) else order.order_type
+        logger.info(f"Submitting order: {order_type_value} {order.quantity} shares of {order.stock_code}")
 
         # Determine tr_cd and trde_tp
-        tr_cd = "kt10000" if order.order_type == OrderType.BUY else "kt10001"  # 매수/매도 구분
+        tr_cd = "kt10000" if order_type_value == OrderType.BUY.value else "kt10001"  # 매수/매도 구분
 
-        if order.price_type == PriceType.MARKET:
+        price_type_value = order.price_type.value if isinstance(order.price_type, PriceType) else order.price_type
+        if price_type_value == PriceType.MARKET.value:
             trde_tp = "3"  # 시장가
             ord_uv = 0  # 시장가는 0
         else:

@@ -122,10 +122,10 @@ class OrderHistory:
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환."""
         data = asdict(self)
-        # Enum을 문자열로 변환
-        data["order_type"] = self.order_type.value
-        data["price_type"] = self.price_type.value
-        data["status"] = self.status.value
+        # Enum을 문자열로 변환 (use_enum_values=True로 이미 문자열일 수 있음)
+        data["order_type"] = self.order_type.value if hasattr(self.order_type, 'value') else self.order_type
+        data["price_type"] = self.price_type.value if hasattr(self.price_type, 'value') else self.price_type
+        data["status"] = self.status.value if hasattr(self.status, 'value') else self.status
         # Decimal을 float로 변환
         for key in ["price", "executed_price", "commission", "slippage"]:
             if data.get(key) is not None:

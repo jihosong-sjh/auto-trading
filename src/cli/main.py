@@ -1418,12 +1418,14 @@ def _generate_backtest_report(result) -> str:
     lines.append("-" * 60)
 
     for i, order in enumerate(result.orders[:10]):
+        order_type_val = order.order_type.value if hasattr(order.order_type, 'value') else order.order_type
+        status_val = order.status.value if hasattr(order.status, 'value') else order.status
         lines.append(
             f"{i+1:3}. {order.timestamp.date()} "
-            f"{order.order_type.value:4} "
+            f"{order_type_val:4} "
             f"{order.stock_code:6} "
             f"{order.quantity:>5} @ {order.filled_price:>10,.0f} "
-            f"[{order.status.value}]"
+            f"[{status_val}]"
         )
 
     if len(result.orders) > 10:

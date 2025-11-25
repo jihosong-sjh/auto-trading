@@ -151,9 +151,10 @@ class OrderExecutor:
                 order.order_type
             )
             if is_duplicate:
+                order_type_str = order.order_type.value if hasattr(order.order_type, 'value') else order.order_type
                 error_msg = (
                     f"중복 주문 차단: 종목 {order.stock_code}에 대한 "
-                    f"{order.order_type.value} 주문이 이미 진행 중입니다 "
+                    f"{order_type_str} 주문이 이미 진행 중입니다 "
                     f"(기존 주문ID: {existing_order_id})"
                 )
                 logger.warning(error_msg)

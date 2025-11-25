@@ -140,11 +140,12 @@ class DashboardDataPublisher:
             order: Filled order
             realized_pnl: Realized P&L for SELL orders
         """
+        order_type_val = order.order_type.value if hasattr(order.order_type, 'value') else order.order_type
         trade = DashboardTrade(
             order_id=order.order_id,
             stock_code=order.stock_code,
             stock_name="",  # TODO: Get from stock info service
-            order_type=order.order_type.value,
+            order_type=order_type_val,
             quantity=order.filled_quantity,
             filled_price=order.filled_price or order.price,
             filled_at=order.filled_at or get_kst_now(),
@@ -168,7 +169,8 @@ class DashboardDataPublisher:
         # Update trades state
         await self._publish_trades_state()
 
-        logger.debug(f"Published trade: {order.order_id} {order.order_type.value} {order.stock_code}")
+        order_type_log = order.order_type.value if hasattr(order.order_type, 'value') else order.order_type
+        logger.debug(f"Published trade: {order.order_id} {order_type_log} {order.stock_code}")
 
     async def publish_price_update(self, stock_code: str, price: Decimal) -> None:
         """Publish a price update for a position.
