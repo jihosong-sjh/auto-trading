@@ -538,10 +538,12 @@ class StrategyEngine:
                             strategy_name=strategy_name
                         )
 
+                        order_type_str = order.order_type.value if hasattr(order.order_type, 'value') else str(order.order_type)
+                        price_type_str = config.price_type.value if hasattr(config.price_type, 'value') else str(config.price_type)
                         logger.info(
                             f"[{strategy_name}] Creating order: "
-                            f"{order.order_type.value} {order.stock_code} "
-                            f"{order.quantity}주 @ {config.price_type.value} "
+                            f"{order_type_str} {order.stock_code} "
+                            f"{order.quantity}주 @ {price_type_str} "
                             f"(ID: {order.order_id})"
                         )
 
@@ -558,6 +560,10 @@ class StrategyEngine:
                                     f"@ {filled_order.filled_price:,.0f}원 "
                                     f"(Status: {filled_order.status.value})"
                                 )
+
+                                # Phase 1.5: 매수 체결 시 손절가/익절가 자동 설정
+                                if filled_order.order_type == OrderType.BUY and filled_order.status == OrderStatus.FILLED:
+                                    await self._set_stop_loss_take_profit(filled_order, config)
                         else:
                             logger.error(
                                 f"[{strategy_name}] Order execution failed: {error_msg}"
@@ -569,9 +575,92 @@ class StrategyEngine:
                             exc_info=True
                         )
 
-                # 매도 시그널 평가
-                # TODO: 현재 포지션이 있는지 확인 필요
-                # sell_signal = await strategy.evaluate_sell_signal(stock)
+                # 매도 시그널 평가 (현재 포지션이 있는 경우)
+                position = self.positions.get(stock.stock_code)
+                if position:
+                    try:
+                        # 1. 전략의 매도 신호 확인
+                        sell_signal = await strategy.evaluate_sell_signal(position, stock)
+
+                        # 2. 손절/익절 트리거 확인 (병행 처리)
+                        stop_loss_triggered = position.check_stop_loss_triggered()
+                        take_profit_triggered = position.check_take_profit_triggered()
+
+                        # 어느 하나라도 발생하면 매도
+                        should_sell = sell_signal or stop_loss_triggered or take_profit_triggered
+
+                        if should_sell:
+                            # 매도 사유 수집
+                            reasons = []
+                            if sell_signal:
+                                reasons.append("전략 신호")
+                            if stop_loss_triggered:
+                                reasons.append("손절")
+                            if take_profit_triggered:
+                                reasons.append("익절")
+
+                            logger.info(
+                                f"[{strategy_name}] SELL signal for {stock.stock_code} "
+                                f"at {stock.current_price} (사유: {', '.join(reasons)})"
+                            )
+
+                            # 매도 주문 생성 및 실행
+                            if self.order_executor is None:
+                                logger.warning(
+                                    f"[{strategy_name}] OrderExecutor not configured, skipping sell order"
+                                )
+                            else:
+                                # 전략 설정에서 가격 타입 가져오기
+                                config = self.strategy_configs[strategy_name]
+
+                                # 매도 주문 가격 설정
+                                limit_price = None
+                                if config.price_type == PriceType.LIMIT:
+                                    limit_price = stock.current_price
+
+                                # Order 객체 생성 (전량 매도)
+                                sell_order = Order(
+                                    account_number=position.account_number,
+                                    stock_code=stock.stock_code,
+                                    order_type=OrderType.SELL,
+                                    price_type=config.price_type,
+                                    quantity=position.quantity,
+                                    limit_price=limit_price,
+                                    strategy_name=strategy_name
+                                )
+
+                                sell_order_type_str = sell_order.order_type.value if hasattr(sell_order.order_type, 'value') else str(sell_order.order_type)
+                                sell_price_type_str = config.price_type.value if hasattr(config.price_type, 'value') else str(config.price_type)
+                                logger.info(
+                                    f"[{strategy_name}] Creating sell order: "
+                                    f"{sell_order_type_str} {sell_order.stock_code} "
+                                    f"{sell_order.quantity}주 @ {sell_price_type_str} "
+                                    f"(ID: {sell_order.order_id})"
+                                )
+
+                                # 주문 실행
+                                success, error_msg, filled_order = await self.order_executor.execute_order(sell_order)
+
+                                if success:
+                                    logger.info(
+                                        f"[{strategy_name}] Sell order executed successfully: {sell_order.order_id}"
+                                    )
+                                    if filled_order:
+                                        logger.info(
+                                            f"[{strategy_name}] Filled: {filled_order.filled_quantity}주 "
+                                            f"@ {filled_order.filled_price:,.0f}원 "
+                                            f"(Status: {filled_order.status.value})"
+                                        )
+                                else:
+                                    logger.error(
+                                        f"[{strategy_name}] Sell order execution failed: {error_msg}"
+                                    )
+
+                    except Exception as e:
+                        logger.error(
+                            f"[{strategy_name}] Error evaluating/executing sell signal for {stock.stock_code}: {e}",
+                            exc_info=True
+                        )
 
             except Exception as e:
                 logger.error(
@@ -607,3 +696,71 @@ class StrategyEngine:
                 pass
 
         logger.info("Strategy engine stopped")
+
+    async def _set_stop_loss_take_profit(
+        self,
+        filled_order: Order,
+        config: StrategyConfig
+    ) -> None:
+        """매수 체결 후 포지션에 손절가/익절가를 자동 설정합니다 (Phase 1.5).
+
+        전략 설정의 stop_loss_pct, take_profit_pct를 사용하여
+        평균 매수가 기준으로 손절가/익절가를 계산하고 설정합니다.
+
+        Args:
+            filled_order: 체결된 매수 주문.
+            config: 전략 설정 (parameters에 stop_loss_pct, take_profit_pct 포함).
+        """
+        try:
+            # 포지션 확인
+            position = self.positions.get(filled_order.stock_code)
+            if not position:
+                logger.warning(
+                    f"[Phase1.5] 포지션을 찾을 수 없음: {filled_order.stock_code}"
+                )
+                return
+
+            # 전략 파라미터에서 손절/익절 비율 가져오기
+            stop_loss_pct = config.parameters.get("stop_loss_pct")
+            take_profit_pct = config.parameters.get("take_profit_pct")
+
+            if stop_loss_pct is None and take_profit_pct is None:
+                logger.debug(
+                    f"[Phase1.5] 전략 '{config.strategy_name}'에 손절/익절 설정 없음"
+                )
+                return
+
+            # 손절가 설정
+            if stop_loss_pct is not None:
+                stop_loss_price = position.average_buy_price * (
+                    Decimal("1") - Decimal(str(stop_loss_pct))
+                )
+                position.set_stop_loss(stop_loss_price)
+                logger.info(
+                    f"[Phase1.5] 손절가 설정: {filled_order.stock_code} "
+                    f"@ {stop_loss_price:,.0f}원 "
+                    f"(평균가 {position.average_buy_price:,.0f}원에서 {stop_loss_pct*100:.1f}% 하락)"
+                )
+
+            # 익절가 설정
+            if take_profit_pct is not None:
+                take_profit_price = position.average_buy_price * (
+                    Decimal("1") + Decimal(str(take_profit_pct))
+                )
+                position.set_take_profit(take_profit_price)
+                logger.info(
+                    f"[Phase1.5] 익절가 설정: {filled_order.stock_code} "
+                    f"@ {take_profit_price:,.0f}원 "
+                    f"(평균가 {position.average_buy_price:,.0f}원에서 {take_profit_pct*100:.1f}% 상승)"
+                )
+
+        except ValueError as e:
+            # set_stop_loss/set_take_profit에서 발생하는 검증 오류
+            logger.warning(
+                f"[Phase1.5] 손절/익절 가격 검증 실패: {e}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[Phase1.5] 손절/익절 설정 중 오류: {e}",
+                exc_info=True
+            )

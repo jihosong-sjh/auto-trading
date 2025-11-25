@@ -658,27 +658,33 @@ class KiwoomClient:
         """계좌 잔고 조회 (kt00001 예수금상세현황요청).
 
         URL: POST /api/dostk/acnt
-        Request: tr_cd, acnt_no
-        Response: entr (예수금), ord_alowa (주문가능현금), wthd_alowa (인출가능금액)
+        API ID: kt00001 (예수금상세현황요청)
+        Request Header: api-id (TR명)
+        Request Body: qry_tp (조회구분: 3=추정조회, 2=일반조회)
+        Response: entr (예수금), ord_alow_amt (주문가능금액), pymn_alow_amt (출금가능금액)
         """
         logger.info(f"Fetching account balance for {self.account_number}")
 
         payload = {
-            "tr_cd": "kt00001",  # 예수금상세현황요청
-            "acnt_no": self.account_number
+            "qry_tp": "3"  # 3: 추정조회, 2: 일반조회
         }
 
-        data = await self._request("POST", "/api/dostk/acnt", json=payload)
+        data = await self._request(
+            "POST",
+            "/api/dostk/acnt",
+            tr_id="kt00001",  # API ID를 Header에 전달
+            json=payload
+        )
 
         # Extract balance information
         entr = Decimal(str(data.get("entr", 0)))  # 예수금
-        ord_alowa = Decimal(str(data.get("ord_alowa", 0)))  # 주문가능현금
-        # wthd_alowa = Decimal(str(data.get("wthd_alowa", 0)))  # 인출가능금액 (현재 미사용)
+        ord_alow_amt = Decimal(str(data.get("ord_alow_amt", 0)))  # 주문가능금액
+        # pymn_alow_amt = Decimal(str(data.get("pymn_alow_amt", 0)))  # 출금가능금액 (현재 미사용)
 
         return Account(
             account_number=self.account_number,
             name=data.get("acnt_nm", ""),
-            cash_balance=ord_alowa,  # Use ord_alowa as available cash
+            cash_balance=ord_alow_amt,  # Use ord_alow_amt as available cash
             total_asset_value=entr,  # Use entr as total asset
             total_pnl=Decimal("0"),  # Not provided by this API
             daily_pnl=Decimal("0"),  # Not provided by this API

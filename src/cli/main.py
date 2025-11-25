@@ -19,6 +19,7 @@ from ..models.stock import Stock
 from ..models.system_status import SystemStatus
 from ..services.data_collector import DataCollector
 from ..services.order_executor import OrderExecutor
+from ..services.risk_monitor import RiskMonitor
 from ..services.strategy_engine import StrategyEngine
 from ..utils.logger import get_logger
 
@@ -71,6 +72,7 @@ class TradingSystem:
         self.data_collector: Optional[DataCollector] = None
         self.strategy_engine: Optional[StrategyEngine] = None
         self.order_executor: Optional[OrderExecutor] = None
+        self.risk_monitor: Optional[RiskMonitor] = None
         self.client = None  # Store client for cleanup
 
         # Shared state for services
@@ -225,6 +227,22 @@ class TradingSystem:
             account_service=None  # Will be set up later if needed
         )
 
+        # Initialize RiskMonitor (Phase 2)
+        from ..services.risk_manager import RiskManager
+        risk_manager = RiskManager(
+            daily_loss_limit_pct=Decimal("0.02"),
+            max_position_concentration=Decimal("0.3"),
+            warning_threshold=Decimal("0.8")
+        )
+        self.risk_monitor = RiskMonitor(
+            risk_manager=risk_manager,
+            order_executor=self.order_executor,
+            positions=self.positions,
+            client=client,
+            check_interval=1.0  # 1초마다 체크
+        )
+        logger.info("RiskMonitor initialized (1-second interval)")
+
         # Initialize StrategyEngine with OrderExecutor
         self.strategy_engine = StrategyEngine(
             config_path=None,  # Uses default path: config/strategies.yaml
@@ -275,6 +293,15 @@ class TradingSystem:
             )
             self.tasks.append(task)
 
+        # Phase 2: RiskMonitor 백그라운드 태스크
+        if self.risk_monitor:
+            task = asyncio.create_task(
+                self.risk_monitor.run(),
+                name="risk_monitor"
+            )
+            self.tasks.append(task)
+            logger.info("RiskMonitor background task started")
+
         # TimescaleDB 로그 플러시 태스크
         if self.ts_log_handler:
             task = asyncio.create_task(
@@ -324,6 +351,11 @@ class TradingSystem:
                 logger.warning(
                     "Some tasks did not complete within timeout"
                 )
+
+        # Phase 2: RiskMonitor cleanup
+        if self.risk_monitor:
+            logger.info("Stopping RiskMonitor...")
+            await self.risk_monitor.stop()
 
         # OrderExecutor cleanup (if needed)
         # Note: OrderExecutor doesn't have a close() method currently

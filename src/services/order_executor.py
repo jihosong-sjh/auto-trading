@@ -117,8 +117,9 @@ class OrderExecutor:
             >>> order = Order(...)
             >>> success, error, filled_order = await executor.execute_order(order)
         """
+        order_type_str = order.order_type.value if hasattr(order.order_type, 'value') else str(order.order_type)
         logger.info(
-            f"주문 실행 시작: {order.order_type.value} {order.stock_code} "
+            f"주문 실행 시작: {order_type_str} {order.stock_code} "
             f"{order.quantity}주 (주문ID: {order.order_id})"
         )
 
