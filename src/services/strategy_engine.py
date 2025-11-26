@@ -538,9 +538,9 @@ class StrategyEngine:
                         # 4. 포지션 크기(수량) 계산
                         quantity = await strategy.calculate_position_size(stock, available_capital)
 
-                        if quantity <= 0:
+                        if quantity is None or quantity <= 0:
                             logger.info(
-                                f"[{strategy_name}] Position size is 0, skipping order"
+                                f"[{strategy_name}] Position size is 0 or None, skipping order"
                             )
                             continue
 
