@@ -164,8 +164,12 @@ class KiwoomWebSocketClient:
 
     @property
     def is_connected(self) -> bool:
-        """연결 여부."""
-        return self._state == ConnectionState.CONNECTED
+        """연결 여부 (실제 WebSocket 상태 확인)."""
+        return (
+            self._state == ConnectionState.CONNECTED
+            and self._websocket is not None
+            and not self._websocket.closed
+        )
 
     async def connect(self) -> bool:
         """WebSocket 연결.
@@ -177,9 +181,17 @@ class KiwoomWebSocketClient:
             WebSocketConnectionError: 연결 실패.
             WebSocketAuthError: 인증 실패.
         """
-        if self._state == ConnectionState.CONNECTED:
-            logger.warning("Already connected to WebSocket")
-            return True
+        # 실제 WebSocket 연결 상태 확인 (state만으로는 부족)
+        if self._state == ConnectionState.CONNECTED and self._websocket is not None:
+            # 실제 연결이 살아있는지 확인
+            if not self._websocket.closed:
+                logger.warning("Already connected to WebSocket")
+                return True
+            else:
+                # 연결은 끊어졌지만 state가 CONNECTED인 경우 - 상태 초기화
+                logger.info("WebSocket was closed, reconnecting...")
+                self._state = ConnectionState.DISCONNECTED
+                self._websocket = None
 
         self._state = ConnectionState.CONNECTING
         logger.info(f"Connecting to WebSocket: {self.websocket_url}")
