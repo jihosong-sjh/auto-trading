@@ -163,6 +163,30 @@ class Settings(BaseSettings):
         default=1.0, description="변동성 임계값 (%) - TTL 조정 기준"
     )
 
+    # Redis Streams 설정 (버퍼 역할)
+    redis_streams_enabled: bool = Field(
+        default=True, description="Redis Streams 활성화 여부"
+    )
+    redis_stream_max_len: int = Field(
+        default=100000, description="Stream 최대 길이 (approximate)"
+    )
+    redis_stream_retention_hours: int = Field(
+        default=1, description="Stream 메시지 보존 시간 (시간)"
+    )
+
+    # Account Cache 설정 (API 호출 최적화)
+    account_cache_enabled: bool = Field(
+        default=True, description="계좌 캐시 활성화 여부"
+    )
+    account_cache_sync_interval: int = Field(
+        default=10, description="계좌 캐시 백그라운드 동기화 간격 (초)"
+    )
+
+    # Throttling 설정
+    market_data_throttle_ms: int = Field(
+        default=100, description="동일 종목 중복 처리 방지 간격 (ms)"
+    )
+
     # TimescaleDB 설정 (실시간 이벤트 로그 저장)
     enable_timescaledb: bool = Field(
         default=False, description="TimescaleDB 활성화 여부"

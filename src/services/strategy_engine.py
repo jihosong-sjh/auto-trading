@@ -6,11 +6,13 @@ T078: DataCollector와 asyncio.Queue를 통해 통합되어,
       실시간 시세 데이터를 수신하여 전략 평가를 수행합니다.
 T087: RiskManager를 통합하여 매 주문 전 위험 검증을 수행합니다.
 Phase 6: order_book_queue를 소비하여 호가 기반 전략에 실시간 호가 데이터 전달.
+Phase 7: Redis Streams + AccountCache로 Queue Overflow 해결 및 API 최적화.
 """
 
 import asyncio
 import importlib
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 from decimal import Decimal
@@ -32,6 +34,8 @@ from ..utils.logger import get_logger
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .order_executor import OrderExecutor
+    from ..cache.account_cache import AccountCache
+    from ..cache.redis_stream_manager import RedisStreamManager
 
 
 logger = get_logger(__name__)
@@ -92,7 +96,10 @@ class StrategyEngine:
         risk_manager: Optional[RiskManager] = None,
         account: Optional[Account] = None,
         positions: Optional[Dict[str, Position]] = None,
-        order_executor: Optional["OrderExecutor"] = None
+        order_executor: Optional["OrderExecutor"] = None,
+        stream_manager: Optional["RedisStreamManager"] = None,
+        account_cache: Optional["AccountCache"] = None,
+        throttle_ms: int = 100,
     ):
         """전략 엔진 초기화.
 
@@ -104,6 +111,9 @@ class StrategyEngine:
             account: 현재 계좌 정보 (T087).
             positions: 현재 포지션 딕셔너리 (T087).
             order_executor: 주문 실행기. None이면 주문 실행 기능 비활성화.
+            stream_manager: Redis Streams 관리자 (Phase 7). None이면 Queue 사용.
+            account_cache: 계좌 캐시 (Phase 7). None이면 직접 API 호출.
+            throttle_ms: 동일 종목 재처리 방지 간격 (ms). 기본값 100ms.
         """
         self.config_path = config_path or Path("config/strategies.yaml")
         self.strategies: Dict[str, BaseStrategy] = {}
@@ -117,6 +127,12 @@ class StrategyEngine:
         # Phase 6: 호가 데이터 큐
         self.order_book_queue = order_book_queue
         self._order_book_task: Optional[asyncio.Task] = None
+
+        # Phase 7: Redis Streams + AccountCache
+        self.stream_manager = stream_manager
+        self.account_cache = account_cache
+        self.throttle_ms = throttle_ms
+        self._last_processed: Dict[str, float] = {}  # Throttling용
 
         # T087: RiskManager 통합
         self.risk_manager = risk_manager or RiskManager(
@@ -418,24 +434,33 @@ class StrategyEngine:
 
     # T078: DataCollector 통합 메서드
     async def consume_market_data(self) -> None:
-        """시장 데이터 큐에서 데이터를 소비하고 전략 평가 (T078).
+        """시장 데이터를 소비하고 전략 평가 (T078, Phase 7).
 
-        market_data_queue에서 Stock 데이터를 수신하여
+        Redis Streams 또는 asyncio.Queue에서 Stock 데이터를 수신하여
         각 전략의 매수/매도 시그널을 평가합니다.
 
-        Raises:
-            RuntimeError: market_data_queue가 설정되지 않은 경우
-        """
-        if self.market_data_queue is None:
-            raise RuntimeError("market_data_queue is not configured")
+        Phase 7: Redis Streams가 설정되면 Conflation과 Throttling을 적용합니다.
 
+        Raises:
+            RuntimeError: 데이터 소스가 설정되지 않은 경우
+        """
+        # Phase 7: Redis Streams 우선, 없으면 Queue 사용
+        if self.stream_manager:
+            await self._consume_from_streams()
+        elif self.market_data_queue:
+            await self._consume_from_queue()
+        else:
+            raise RuntimeError("No data source configured (stream_manager or market_data_queue)")
+
+    async def _consume_from_queue(self) -> None:
+        """asyncio.Queue에서 데이터 소비 (기존 방식)."""
         if not self.strategies:
             logger.warning("No strategies loaded. Call load_and_initialize_strategies() first.")
             return
 
         self.running = True
         logger.info(
-            f"Starting market data consumer with {len(self.strategies)} strategies"
+            f"Starting market data consumer (Queue) with {len(self.strategies)} strategies"
         )
 
         try:
@@ -465,6 +490,60 @@ class StrategyEngine:
         finally:
             self.running = False
             logger.info("Market data consumer stopped")
+
+    async def _consume_from_streams(self) -> None:
+        """Redis Streams에서 데이터 소비 (Phase 7).
+
+        Conflation: 종목별 최신 데이터만 처리
+        Throttling: 동일 종목 재처리 방지
+        """
+        if not self.strategies:
+            logger.warning("No strategies loaded. Call load_and_initialize_strategies() first.")
+            return
+
+        self.running = True
+        logger.info(
+            f"Starting market data consumer (Redis Streams) with {len(self.strategies)} strategies"
+        )
+
+        throttle_sec = self.throttle_ms / 1000.0
+
+        try:
+            while self.running:
+                try:
+                    # Conflation: 종목별 최신 데이터만 가져오기
+                    latest_stocks = await self.stream_manager.get_latest_by_stock("market_data")
+
+                    if not latest_stocks:
+                        await asyncio.sleep(0.05)  # 50ms 대기
+                        continue
+
+                    for stock_code, stock in latest_stocks.items():
+                        # Throttling: 동일 종목 재처리 방지
+                        now = time.time()
+                        last_time = self._last_processed.get(stock_code, 0)
+
+                        if now - last_time < throttle_sec:
+                            continue
+
+                        self._last_processed[stock_code] = now
+                        await self._evaluate_strategies(stock)
+
+                    await asyncio.sleep(0.05)  # 50ms 간격 처리
+
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Error consuming from streams: {e}")
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            logger.info("Stream consumer cancelled")
+            raise
+
+        finally:
+            self.running = False
+            logger.info("Stream consumer stopped")
 
     async def _evaluate_strategies(self, stock: Stock) -> None:
         """모든 전략에 대해 시그널 평가 (내부 메서드).
@@ -519,8 +598,18 @@ class StrategyEngine:
                         continue
 
                     try:
-                        # 1. 계좌 정보 조회
-                        account = await self.order_executor.client.get_account()
+                        # 1. 계좌 정보 조회 (Phase 7: AccountCache 사용)
+                        if self.account_cache:
+                            # Redis 캐시에서 조회 (API 호출 없음, 1ms 미만)
+                            account = await self.account_cache.get_cached_account()
+                            if account is None:
+                                logger.warning(
+                                    f"[{strategy_name}] Account cache empty, skipping order"
+                                )
+                                continue
+                        else:
+                            # 폴백: 직접 API 호출 (비권장)
+                            account = await self.order_executor.client.get_account()
 
                         # 2. 전략 설정에서 포지션 크기 비율 가져오기
                         config = self.strategy_configs[strategy_name]

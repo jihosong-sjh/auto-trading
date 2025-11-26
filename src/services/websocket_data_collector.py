@@ -14,6 +14,7 @@ from ..api.kiwoom_websocket import KiwoomWebSocketClient, RealTimeType
 from ..api.websocket_exceptions import WebSocketError
 from ..cache.price_cache import RedisPriceCache
 from ..cache.redis_manager import RedisManager
+from ..cache.redis_stream_manager import RedisStreamManager
 from ..config.settings import Settings
 from ..models.order_book import OrderBook
 from ..models.realtime_data import (
@@ -65,6 +66,7 @@ class WebSocketDataCollector:
         stock_codes: Optional[List[str]] = None,
         fallback_to_rest: bool = True,
         redis_manager: Optional[RedisManager] = None,
+        stream_manager: Optional[RedisStreamManager] = None,
     ):
         """데이터 수집기 초기화.
 
@@ -77,6 +79,7 @@ class WebSocketDataCollector:
             stock_codes: 모니터링할 종목코드 목록.
             fallback_to_rest: WebSocket 실패 시 REST 폴백 사용.
             redis_manager: Redis 매니저 (캐시용).
+            stream_manager: Redis Streams 매니저 (버퍼용, Queue 대체).
         """
         self.config = config
         self.kiwoom_client = kiwoom_client
@@ -109,6 +112,10 @@ class WebSocketDataCollector:
         if redis_manager:
             self.redis_price_cache = RedisPriceCache(redis_manager)
 
+        # Redis Streams (Queue 대체 버퍼)
+        self.stream_manager = stream_manager
+        self._stream_name = "market_data"  # Stream 이름
+
         # REST 폴백용 데이터 수집기 (lazy initialization)
         self._rest_collector: Optional[DataCollector] = None
 
@@ -123,6 +130,8 @@ class WebSocketDataCollector:
             "balance_update_messages": 0,
             "websocket_reconnects": 0,
             "rest_fallback_count": 0,
+            "stream_xadd_count": 0,
+            "stream_xadd_errors": 0,
         }
 
         # 콜백 등록
@@ -301,11 +310,37 @@ class WebSocketDataCollector:
         # Stock 모델로 변환
         stock = self.transformer.trade_to_stock(trade)
 
-        # 큐에 추가
-        try:
-            self.market_data_queue.put_nowait(stock)
-        except asyncio.QueueFull:
-            logger.warning(f"market_data_queue full, dropping data for {stock.stock_code}")
+        # Redis Streams 또는 Queue에 추가
+        if self.stream_manager:
+            # Redis Streams (XADD) - 데이터 손실 없음
+            try:
+                await self.stream_manager.xadd(
+                    self._stream_name,
+                    {
+                        "stock_code": stock.stock_code,
+                        "stock_name": stock.stock_name,
+                        "current_price": str(stock.current_price),
+                        "volume": stock.volume,
+                        "change": str(stock.change) if stock.change else "0",
+                        "change_rate": str(stock.change_rate) if stock.change_rate else "0",
+                        "timestamp": trade.timestamp.isoformat(),
+                    },
+                )
+                self._stats["stream_xadd_count"] += 1
+            except Exception as e:
+                self._stats["stream_xadd_errors"] += 1
+                logger.warning(f"Redis XADD failed, falling back to queue: {e}")
+                # Stream 실패 시 Queue 폴백
+                try:
+                    self.market_data_queue.put_nowait(stock)
+                except asyncio.QueueFull:
+                    logger.warning(f"market_data_queue full, dropping data for {stock.stock_code}")
+        else:
+            # 기존 Queue 방식
+            try:
+                self.market_data_queue.put_nowait(stock)
+            except asyncio.QueueFull:
+                logger.warning(f"market_data_queue full, dropping data for {stock.stock_code}")
 
         # Redis 캐시 업데이트
         if self.redis_price_cache:
@@ -508,6 +543,7 @@ class WebSocketDataCollector:
         return {
             **self._stats,
             "using_websocket": self.using_websocket,
+            "using_redis_streams": self.stream_manager is not None,
             "connected": self.ws_client.is_connected,
             "subscribed_stocks": len(self.stock_codes),
             "last_data_time": self._last_data_time.isoformat(),

@@ -55,6 +55,14 @@ try:
 except ImportError:
     DASHBOARD_AVAILABLE = False
 
+# Redis Streams / Account Cache 관련 임포트 (Phase 3)
+try:
+    from ..cache.redis_stream_manager import RedisStreamManager
+    from ..cache.account_cache import AccountCache
+    REDIS_STREAMS_AVAILABLE = True
+except ImportError:
+    REDIS_STREAMS_AVAILABLE = False
+
 logger = get_logger(__name__)
 
 
@@ -116,6 +124,10 @@ class TradingSystem:
         # Dashboard 데이터 발행 관련
         self.redis_manager: Optional[RedisManager] = None
         self.dashboard_publisher: Optional[DashboardDataPublisher] = None
+
+        # Redis Streams / Account Cache (Phase 3 - Queue Overflow 해결)
+        self.stream_manager: Optional[RedisStreamManager] = None
+        self.account_cache: Optional[AccountCache] = None
 
         # Background tasks
         self.tasks: list[asyncio.Task] = []
@@ -269,6 +281,64 @@ class TradingSystem:
         # Store client reference for cleanup
         self.client = client
 
+        # Phase 3: Redis Streams / Account Cache 초기화 (Queue Overflow 해결)
+        use_redis_streams = (
+            getattr(self.config, "redis_streams_enabled", True)
+            and getattr(self.config, "redis_enabled", False)
+            and REDIS_STREAMS_AVAILABLE
+            and mode != "simulator"  # 시뮬레이터 모드에서는 기존 Queue 사용
+        )
+
+        if use_redis_streams:
+            try:
+                # Redis 연결 초기화 (Dashboard와 별도 또는 공유)
+                if not self.redis_manager:
+                    self.redis_manager = RedisManager(
+                        host=self.config.redis_host,
+                        port=self.config.redis_port,
+                        db=self.config.redis_db,
+                        password=self.config.redis_password,
+                        max_connections=self.config.redis_max_connections,
+                        default_ttl=self.config.redis_cache_ttl
+                    )
+                    await self.redis_manager.initialize()
+                    logger.info(
+                        f"Connected to Redis at {self.config.redis_host}:{self.config.redis_port} "
+                        f"for Redis Streams"
+                    )
+
+                # RedisStreamManager 초기화
+                self.stream_manager = RedisStreamManager(
+                    redis_manager=self.redis_manager,
+                    stream_prefix="trading:",
+                    max_len=getattr(self.config, "redis_stream_max_len", 100000),
+                    retention_hours=getattr(self.config, "redis_stream_retention_hours", 1),
+                )
+                logger.info(
+                    f"RedisStreamManager initialized "
+                    f"(max_len={getattr(self.config, 'redis_stream_max_len', 100000)}, "
+                    f"retention={getattr(self.config, 'redis_stream_retention_hours', 1)}h)"
+                )
+
+                # AccountCache 초기화
+                if getattr(self.config, "account_cache_enabled", True):
+                    self.account_cache = AccountCache(
+                        redis_manager=self.redis_manager,
+                        sync_interval=getattr(self.config, "account_cache_sync_interval", 10),
+                    )
+                    logger.info(
+                        f"AccountCache initialized "
+                        f"(sync_interval={getattr(self.config, 'account_cache_sync_interval', 10)}s)"
+                    )
+
+            except Exception as e:
+                logger.error(f"Failed to initialize Redis Streams/Account Cache: {e}", exc_info=True)
+                logger.warning("Continuing with traditional Queue-based approach")
+                self.stream_manager = None
+                self.account_cache = None
+        elif not REDIS_STREAMS_AVAILABLE:
+            logger.debug("Redis Streams dependencies not available, using Queue-based approach")
+
         # Initialize data collector (WebSocket or REST polling)
         use_websocket = (
             getattr(self.config, "websocket_enabled", True)
@@ -285,11 +355,14 @@ class TradingSystem:
                 order_event_queue=self.order_event_queue,
                 stock_codes=list(self.config.watch_symbols),
                 fallback_to_rest=getattr(self.config, "websocket_fallback_to_rest", True),
+                redis_manager=self.redis_manager,
+                stream_manager=self.stream_manager,  # Phase 3: Redis Streams
             )
             logger.info(
                 "Initialized WebSocket data collector "
                 f"(stocks={len(self.config.watch_symbols)}, "
-                f"fallback_to_rest={getattr(self.config, 'websocket_fallback_to_rest', True)})"
+                f"fallback_to_rest={getattr(self.config, 'websocket_fallback_to_rest', True)}, "
+                f"redis_streams={'enabled' if self.stream_manager else 'disabled'})"
             )
         else:
             self.data_collector = DataCollector(
@@ -336,6 +409,7 @@ class TradingSystem:
 
         # Initialize StrategyEngine with OrderExecutor
         # Phase 6: order_book_queue 전달하여 호가 기반 전략 지원
+        # Phase 3: Redis Streams + Account Cache (Queue Overflow 해결)
         self.strategy_engine = StrategyEngine(
             config_path=None,  # Uses default path: config/strategies.yaml
             market_data_queue=self.market_data_queue,
@@ -343,7 +417,10 @@ class TradingSystem:
             risk_manager=None,  # Uses default RiskManager
             account=None,  # Will be updated when account info is fetched
             positions=self.positions,  # Share positions with OrderExecutor
-            order_executor=self.order_executor  # Enable order execution
+            order_executor=self.order_executor,  # Enable order execution
+            stream_manager=self.stream_manager,  # Phase 3: Redis Streams
+            account_cache=self.account_cache,  # Phase 3: Account Cache
+            throttle_ms=getattr(self.config, "market_data_throttle_ms", 100),  # Phase 3
         )
 
         # Load strategies
@@ -451,6 +528,14 @@ class TradingSystem:
                 name="strategy_engine"
             )
             self.tasks.append(task)
+
+        # Phase 3: AccountCache 백그라운드 동기화 태스크
+        if self.account_cache and self.client:
+            try:
+                await self.account_cache.start_sync_task(self.client)
+                logger.info("AccountCache sync task started")
+            except Exception as e:
+                logger.error(f"Failed to start AccountCache sync: {e}")
 
         # Phase 2: RiskMonitor 백그라운드 태스크
         if self.risk_monitor:
@@ -584,6 +669,12 @@ class TradingSystem:
             logger.info("Stopping OrderExecutor event consumer...")
             await self.order_executor.stop()
             logger.info("OrderExecutor stopped")
+
+        # Phase 3: AccountCache cleanup
+        if self.account_cache:
+            logger.info("Stopping AccountCache sync task...")
+            await self.account_cache.stop_sync_task()
+            logger.info("AccountCache stopped")
 
         # Close API client connection
         if self.client:
