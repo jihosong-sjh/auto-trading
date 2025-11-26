@@ -18,7 +18,7 @@ from decimal import Decimal
 import yaml
 from pydantic import BaseModel, Field
 
-from ..models import Stock, PriceType, OrderType
+from ..models import Stock, PriceType, OrderType, OrderStatus
 from ..models.strategy import BaseStrategy
 from ..models.account import Account
 from ..models.order_book import OrderBook
@@ -26,6 +26,7 @@ from ..models.position import Position
 from ..models.order import Order
 from ..models.realtime_data import OrderBookData
 from .risk_manager import RiskManager
+from ..utils.logger import get_logger
 
 # Forward declaration for type hints
 from typing import TYPE_CHECKING
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
     from .order_executor import OrderExecutor
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class StrategyConfig(BaseModel):
@@ -507,6 +508,16 @@ class StrategyEngine:
                         )
                         continue
 
+                    # 진행 중인 주문이 있으면 스킵 (중복 주문 방지)
+                    pending_orders = self.order_executor.get_pending_orders_by_stock(stock.stock_code)
+                    buy_pending = [o for o in pending_orders if o.order_type == OrderType.BUY]
+                    if buy_pending:
+                        logger.debug(
+                            f"[{strategy_name}] Skipping BUY signal for {stock.stock_code} - "
+                            f"pending order exists (ID: {buy_pending[0].order_id})"
+                        )
+                        continue
+
                     try:
                         # 1. 계좌 정보 조회
                         account = await self.order_executor.client.get_account()
@@ -566,11 +577,18 @@ class StrategyEngine:
                                 f"[{strategy_name}] Order executed successfully: {order.order_id}"
                             )
                             if filled_order:
-                                logger.info(
-                                    f"[{strategy_name}] Filled: {filled_order.filled_quantity}주 "
-                                    f"@ {filled_order.filled_price:,.0f}원 "
-                                    f"(Status: {filled_order.status.value})"
-                                )
+                                # filled_price가 있을 때만 가격 정보 출력 (PENDING 상태에서는 None)
+                                if filled_order.filled_price is not None:
+                                    logger.info(
+                                        f"[{strategy_name}] Filled: {filled_order.filled_quantity}주 "
+                                        f"@ {filled_order.filled_price:,.0f}원 "
+                                        f"(Status: {filled_order.status.value})"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"[{strategy_name}] Order submitted: {filled_order.order_id} "
+                                        f"(Status: {filled_order.status.value})"
+                                    )
 
                                 # Phase 1.5: 매수 체결 시 손절가/익절가 자동 설정
                                 if filled_order.order_type == OrderType.BUY and filled_order.status == OrderStatus.FILLED:

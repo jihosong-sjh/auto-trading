@@ -4,6 +4,7 @@
 Google Style Docstring을 사용하며, logging 모듈을 기반으로 합니다.
 """
 
+import io
 import logging
 import sys
 from pathlib import Path
@@ -64,9 +65,17 @@ def setup_logger(
     log_format = "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
     formatter = KSTFormatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
 
-    # 콘솔 핸들러
+    # 콘솔 핸들러 (Windows cp949 인코딩 문제 해결을 위해 UTF-8 스트림 사용)
     if console_output:
-        console_handler = logging.StreamHandler(sys.stdout)
+        try:
+            # sys.stdout.buffer를 UTF-8로 래핑하여 한글 깨짐 방지
+            utf8_stdout = io.TextIOWrapper(
+                sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True
+            )
+            console_handler = logging.StreamHandler(utf8_stdout)
+        except AttributeError:
+            # buffer 속성이 없는 환경 (일부 IDE, 리다이렉션 등)에서는 기본 stdout 사용
+            console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
