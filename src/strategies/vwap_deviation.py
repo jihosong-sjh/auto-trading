@@ -225,11 +225,12 @@ class VWAPDeviationStrategy(BaseStrategy):
     ) -> Optional[int]:
         """포지션 크기 계산 (비동기).
 
-        가용 자금의 일부(position_size_pct)를 투자합니다.
+        전달받은 가용 자금으로 매수 가능한 수량을 계산합니다.
+        (position_size_pct는 strategy_engine에서 이미 적용됨)
 
         Args:
             stock: 종목 정보.
-            available_balance: 사용 가능한 잔고.
+            available_balance: 사용 가능한 잔고 (이미 position_size_pct 적용됨).
 
         Returns:
             매수 수량 (주). None이면 매수하지 않음.
@@ -238,8 +239,6 @@ class VWAPDeviationStrategy(BaseStrategy):
             return None
 
         available_decimal = Decimal(str(available_balance))
-        capital_to_use = available_decimal * self.position_size_pct
-
-        quantity = int(capital_to_use / stock.current_price)
+        quantity = int(available_decimal / stock.current_price)
 
         return quantity if quantity > 0 else None

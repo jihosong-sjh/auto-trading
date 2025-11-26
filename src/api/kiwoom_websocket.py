@@ -516,8 +516,8 @@ class KiwoomWebSocketClient:
         Args:
             raw_message: 수신된 JSON 메시지.
         """
-        # 디버깅: 모든 수신 메시지 로깅
-        logger.info(f"WebSocket received raw message: {raw_message[:500]}")
+        # 디버깅: 모든 수신 메시지 로깅 (DEBUG 레벨)
+        logger.debug(f"WebSocket received raw message: {raw_message[:500]}")
 
         try:
             data = json.loads(raw_message)
@@ -525,7 +525,7 @@ class KiwoomWebSocketClient:
             raise WebSocketMessageError(f"Invalid JSON message: {e}")
 
         trnm = data.get("trnm", "")
-        logger.info(f"WebSocket parsed message: trnm={trnm}, keys={list(data.keys())}")
+        logger.debug(f"WebSocket parsed message: trnm={trnm}, keys={list(data.keys())}")
 
         # LOGIN 응답 처리 (연결 직후 서버가 보내는 인증 응답)
         if trnm == "LOGIN" or (trnm == "" and "return_code" in data):
