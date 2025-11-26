@@ -786,19 +786,23 @@ class StrategyEngine:
 
     async def _distribute_order_book(
         self,
-        data: OrderBookData
+        data
     ) -> None:
         """호가 데이터를 관련 전략에 전달 (Phase 6).
 
         set_order_book() 메서드를 가진 전략에만 데이터를 전달합니다.
 
         Args:
-            data: WebSocket에서 수신한 호가 데이터.
+            data: WebSocket에서 수신한 호가 데이터 (OrderBookData 또는 OrderBook).
         """
-        stock_code = data.stock_code
-
-        # OrderBookData -> OrderBook 모델 변환
-        order_book = self._convert_order_book_data(data)
+        # 이미 OrderBook인 경우 변환 건너뛰기
+        if isinstance(data, OrderBook):
+            order_book = data
+            stock_code = data.stock_code
+        else:
+            # OrderBookData -> OrderBook 모델 변환
+            stock_code = data.stock_code
+            order_book = self._convert_order_book_data(data)
 
         # 호가 기반 전략에 데이터 전달
         for strategy_name, strategy in self.strategies.items():

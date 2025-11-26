@@ -264,6 +264,10 @@ class KiwoomWebSocketClient:
 
             logger.info("WebSocket connected successfully")
 
+            # 연결 후 LOGIN 메시지 전송하여 서버 인증 요청
+            # 키움증권 WebSocket은 연결 후 LOGIN 메시지를 먼저 보내야 함
+            await self._send_login()
+
             # 연결 콜백 호출
             if self.on_connect:
                 await self.on_connect()
@@ -287,6 +291,40 @@ class KiwoomWebSocketClient:
         except Exception as e:
             self._state = ConnectionState.ERROR
             raise WebSocketConnectionError(f"Unexpected connection error: {e}")
+
+    async def _send_login(self) -> None:
+        """LOGIN 메시지 전송.
+
+        키움증권 WebSocket은 연결 후 클라이언트가 LOGIN 메시지를 보내야
+        서버가 인증 응답을 보냅니다.
+        """
+        if not self._websocket:
+            return
+
+        login_message = {
+            "trnm": "LOGIN",
+            "token": self.kiwoom_client.access_token,
+        }
+
+        try:
+            await self._websocket.send(json.dumps(login_message))
+            logger.info("LOGIN message sent to server")
+        except Exception as e:
+            logger.error(f"Failed to send LOGIN: {e}")
+
+    async def _send_ping_response(self, ping_data: dict) -> None:
+        """서버 PING 메시지에 대한 응답 전송.
+
+        서버가 보낸 PING 메시지를 그대로 echo back하여 연결을 유지합니다.
+        """
+        if not self._websocket:
+            return
+
+        try:
+            await self._websocket.send(json.dumps(ping_data))
+            logger.debug("PING response sent to server")
+        except Exception as e:
+            logger.error(f"Failed to send PING response: {e}")
 
     async def disconnect(self) -> None:
         """WebSocket 연결 해제."""
@@ -363,27 +401,18 @@ class KiwoomWebSocketClient:
                 f"Subscription request sent: {len(stock_codes)} stocks, types={types}"
             )
 
-            # 응답 대기
-            response = await asyncio.wait_for(self._websocket.recv(), timeout=5.0)
-            response_data = json.loads(response)
+            # 구독 목록 업데이트 (응답은 메시지 핸들러에서 처리)
+            # recv()를 직접 호출하지 않음 - 메시지 수신 루프와 충돌 방지
+            for real_type in types:
+                if real_type not in self._subscribed_items:
+                    self._subscribed_items[real_type] = set()
+                self._subscribed_items[real_type].update(stock_codes)
 
-            if response_data.get("return_code") == 0:
-                # 구독 목록 업데이트
-                for real_type in types:
-                    if real_type not in self._subscribed_items:
-                        self._subscribed_items[real_type] = set()
-                    self._subscribed_items[real_type].update(stock_codes)
+            return True
 
-                logger.info(f"Subscription successful: {response_data}")
-                return True
-            else:
-                error_msg = response_data.get("return_msg", "Unknown error")
-                raise WebSocketSubscriptionError(f"Subscription failed: {error_msg}")
-
-        except asyncio.TimeoutError:
-            raise WebSocketSubscriptionError("Subscription timeout")
-        except json.JSONDecodeError as e:
-            raise WebSocketSubscriptionError(f"Invalid response format: {e}")
+        except Exception as e:
+            logger.error(f"Subscription request failed: {e}")
+            raise WebSocketSubscriptionError(f"Subscription failed: {e}")
 
     async def unsubscribe(
         self,
@@ -487,25 +516,41 @@ class KiwoomWebSocketClient:
         Args:
             raw_message: 수신된 JSON 메시지.
         """
+        # 디버깅: 모든 수신 메시지 로깅
+        logger.info(f"WebSocket received raw message: {raw_message[:500]}")
+
         try:
             data = json.loads(raw_message)
         except json.JSONDecodeError as e:
             raise WebSocketMessageError(f"Invalid JSON message: {e}")
 
         trnm = data.get("trnm", "")
+        logger.info(f"WebSocket parsed message: trnm={trnm}, keys={list(data.keys())}")
 
-        # 서버 인증 응답 처리 (연결 직후 서버가 보내는 메시지)
-        # 키움 WebSocket은 연결 후 PINGPONG 또는 빈 trnm으로 인증 확인 메시지를 보냄
-        if trnm == "PINGPONG" or (trnm == "" and "return_code" in data):
+        # LOGIN 응답 처리 (연결 직후 서버가 보내는 인증 응답)
+        if trnm == "LOGIN" or (trnm == "" and "return_code" in data):
             return_code = data.get("return_code", -1)
             if return_code == 0:
-                logger.info("WebSocket server authentication confirmed")
+                logger.info("WebSocket LOGIN authentication confirmed")
                 self._authenticated = True
                 if self._auth_event:
                     self._auth_event.set()
             else:
                 error_msg = data.get("return_msg", "Unknown auth error")
-                logger.error(f"WebSocket authentication failed: {error_msg}")
+                logger.error(f"WebSocket LOGIN authentication failed: {error_msg}")
+            return
+
+        # PING 메시지 처리 - 서버가 보낸 PING을 그대로 echo back
+        if trnm == "PING" or trnm == "PINGPONG":
+            logger.debug(f"Received PING from server, sending response")
+            await self._send_ping_response(data)
+            return
+
+        # SYSTEM 메시지 처리 (에러 또는 알림)
+        if trnm == "SYSTEM":
+            code = data.get("code", "")
+            message = data.get("message", "")
+            logger.warning(f"WebSocket SYSTEM message: code={code}, message={message}")
             return
 
         # 등록/해제 응답
