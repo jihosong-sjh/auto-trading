@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 from zoneinfo import ZoneInfo
 
 import websockets
+from websockets import State
 from websockets.client import WebSocketClientProtocol
 from websockets.exceptions import (
     ConnectionClosed,
@@ -168,7 +169,7 @@ class KiwoomWebSocketClient:
         return (
             self._state == ConnectionState.CONNECTED
             and self._websocket is not None
-            and not self._websocket.closed
+            and self._websocket.state == State.OPEN
         )
 
     async def connect(self) -> bool:
@@ -183,8 +184,8 @@ class KiwoomWebSocketClient:
         """
         # 실제 WebSocket 연결 상태 확인 (state만으로는 부족)
         if self._state == ConnectionState.CONNECTED and self._websocket is not None:
-            # 실제 연결이 살아있는지 확인
-            if not self._websocket.closed:
+            # 실제 연결이 살아있는지 확인 (websockets 15.x: state 속성 사용)
+            if self._websocket.state == State.OPEN:
                 logger.warning("Already connected to WebSocket")
                 return True
             else:

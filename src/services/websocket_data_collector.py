@@ -87,10 +87,13 @@ class WebSocketDataCollector:
         self.fallback_to_rest = fallback_to_rest
 
         # WebSocket 클라이언트
+        # kiwoom_trading_mode: "real" = 실전투자, "virtual"/"mock" = 모의투자
+        trading_mode = getattr(config, "kiwoom_trading_mode", "virtual")
+        is_mock = trading_mode != "real"  # "real"이 아니면 모두 모의투자
         self.ws_client = KiwoomWebSocketClient(
             kiwoom_client=kiwoom_client,
             websocket_url=getattr(config, "websocket_url", None),
-            is_mock=getattr(config, "kiwoom_trading_mode", "mock") == "mock",
+            is_mock=is_mock,
             auto_reconnect=True,
             heartbeat_interval=getattr(config, "websocket_heartbeat_interval", 30.0),
             reconnect_delay=getattr(config, "websocket_reconnect_delay", 1.0),
