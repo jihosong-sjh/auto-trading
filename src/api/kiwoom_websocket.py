@@ -158,6 +158,10 @@ class KiwoomWebSocketClient:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._receive_task: Optional[asyncio.Task] = None
 
+        # 인증 상태
+        self._authenticated = False
+        self._auth_event: Optional[asyncio.Event] = None
+
     @property
     def state(self) -> ConnectionState:
         """현재 연결 상태."""
@@ -171,6 +175,36 @@ class KiwoomWebSocketClient:
             and self._websocket is not None
             and self._websocket.state == State.OPEN
         )
+
+    @property
+    def is_authenticated(self) -> bool:
+        """인증 완료 여부."""
+        return self._authenticated and self.is_connected
+
+    async def wait_for_auth(self, timeout: float = 10.0) -> bool:
+        """서버 인증 완료 대기.
+
+        키움증권 WebSocket은 연결 후 서버가 인증 메시지를 보내야
+        구독 등 다른 요청을 보낼 수 있습니다.
+
+        Args:
+            timeout: 인증 대기 타임아웃 (초).
+
+        Returns:
+            인증 성공 여부.
+        """
+        if self._authenticated:
+            return True
+
+        if not self._auth_event:
+            self._auth_event = asyncio.Event()
+
+        try:
+            await asyncio.wait_for(self._auth_event.wait(), timeout=timeout)
+            return self._authenticated
+        except asyncio.TimeoutError:
+            logger.warning(f"Authentication timeout after {timeout}s")
+            return False
 
     async def connect(self) -> bool:
         """WebSocket 연결.
@@ -223,6 +257,10 @@ class KiwoomWebSocketClient:
             self._current_reconnect_delay = self.reconnect_delay
             self._reconnect_attempts = 0
             self._running = True
+
+            # 인증 상태 초기화 (서버 인증 메시지 대기)
+            self._authenticated = False
+            self._auth_event = asyncio.Event()
 
             logger.info("WebSocket connected successfully")
 
@@ -456,6 +494,20 @@ class KiwoomWebSocketClient:
 
         trnm = data.get("trnm", "")
 
+        # 서버 인증 응답 처리 (연결 직후 서버가 보내는 메시지)
+        # 키움 WebSocket은 연결 후 PINGPONG 또는 빈 trnm으로 인증 확인 메시지를 보냄
+        if trnm == "PINGPONG" or (trnm == "" and "return_code" in data):
+            return_code = data.get("return_code", -1)
+            if return_code == 0:
+                logger.info("WebSocket server authentication confirmed")
+                self._authenticated = True
+                if self._auth_event:
+                    self._auth_event.set()
+            else:
+                error_msg = data.get("return_msg", "Unknown auth error")
+                logger.error(f"WebSocket authentication failed: {error_msg}")
+            return
+
         # 등록/해제 응답
         if trnm in ("REG", "REMOVE"):
             logger.debug(f"Subscription response: {data}")
@@ -466,7 +518,15 @@ class KiwoomWebSocketClient:
             await self._handle_realtime_data(data)
             return
 
-        logger.debug(f"Unknown message type: {trnm}")
+        # 알 수 없는 메시지도 인증 확인 시도 (return_code: 0이면 인증 성공으로 처리)
+        if not self._authenticated and data.get("return_code") == 0:
+            logger.info(f"WebSocket authenticated via message: {trnm or 'empty'}")
+            self._authenticated = True
+            if self._auth_event:
+                self._auth_event.set()
+            return
+
+        logger.debug(f"Unknown message type: {trnm}, data: {data}")
 
     async def _handle_realtime_data(self, data: Dict[str, Any]) -> None:
         """실시간 데이터 처리.
@@ -544,12 +604,20 @@ class KiwoomWebSocketClient:
             self._current_reconnect_delay * 2, self.max_reconnect_delay
         )
 
+        receive_task = None
         try:
             # 토큰 갱신
             await self.kiwoom_client._refresh_token()
 
             # 재연결
             await self.connect()
+
+            # 인증 메시지 수신을 위한 임시 수신 태스크 시작
+            receive_task = asyncio.create_task(self._receive_messages())
+
+            # 인증 완료 대기 (구독 복원 전에 필수)
+            if not await self.wait_for_auth(timeout=10.0):
+                raise WebSocketAuthError("Authentication timeout after reconnect")
 
             # 기존 구독 복원
             await self._restore_subscriptions()
@@ -561,6 +629,14 @@ class KiwoomWebSocketClient:
             self._state = ConnectionState.ERROR
             if self.on_error:
                 await self.on_error(e)
+        finally:
+            # 임시 수신 태스크 정리 (메인 루프에서 새로 시작)
+            if receive_task and not receive_task.done():
+                receive_task.cancel()
+                try:
+                    await receive_task
+                except asyncio.CancelledError:
+                    pass
 
     async def _restore_subscriptions(self) -> None:
         """기존 구독 복원."""

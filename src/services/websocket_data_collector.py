@@ -153,7 +153,25 @@ class WebSocketDataCollector:
                 # WebSocket 연결 시도
                 if await self.ws_client.connect():
                     self.using_websocket = True
-                    logger.info("WebSocket connected, subscribing to real-time data")
+                    logger.info("WebSocket connected, waiting for server authentication...")
+
+                    # 백그라운드에서 메시지 수신 시작 (인증 메시지 수신용)
+                    receive_task = asyncio.create_task(self.ws_client.run_forever())
+
+                    # 서버 인증 완료 대기 (키움증권 WebSocket 요구사항)
+                    # "로그인 인증이 들어오기 전에 다른 전문이 들어왔습니다" 오류 방지
+                    auth_success = await self.ws_client.wait_for_auth(timeout=10.0)
+
+                    if not auth_success:
+                        logger.warning("WebSocket authentication timeout, falling back to REST")
+                        receive_task.cancel()
+                        try:
+                            await receive_task
+                        except asyncio.CancelledError:
+                            pass
+                        raise WebSocketError("Authentication timeout")
+
+                    logger.info("WebSocket authenticated, subscribing to real-time data")
 
                     # 시세 등록 (0B, 0D)
                     if self.stock_codes:
@@ -178,8 +196,8 @@ class WebSocketDataCollector:
                             refresh=True,
                         )
 
-                    # 메시지 수신 루프
-                    await self.ws_client.run_forever()
+                    # 메시지 수신 루프 완료 대기
+                    await receive_task
 
             except WebSocketError as e:
                 logger.error(f"WebSocket error: {e}")
@@ -247,9 +265,25 @@ class WebSocketDataCollector:
         while self.running and not self.using_websocket:
             try:
                 if await self.ws_client.connect():
-                    logger.info("WebSocket reconnected from REST fallback")
-                    self.using_websocket = True
-                    return
+                    # 인증 대기를 위해 메시지 수신 시작
+                    receive_task = asyncio.create_task(self.ws_client.run_forever())
+
+                    # 인증 완료 대기
+                    auth_success = await self.ws_client.wait_for_auth(timeout=10.0)
+
+                    if auth_success:
+                        logger.info("WebSocket reconnected and authenticated from REST fallback")
+                        self.using_websocket = True
+                        # receive_task는 계속 실행 (run 메서드에서 관리)
+                        return
+                    else:
+                        logger.warning("WebSocket reconnect auth timeout")
+                        receive_task.cancel()
+                        try:
+                            await receive_task
+                        except asyncio.CancelledError:
+                            pass
+                        await self.ws_client.disconnect()
             except WebSocketError:
                 pass
 
