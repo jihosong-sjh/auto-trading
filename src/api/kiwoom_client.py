@@ -550,9 +550,10 @@ class KiwoomClient:
 
         data = await self._request("POST", "/api/dostk/ordr", tr_id=tr_cd, json=payload)
 
-        # Check return code
-        return_code = data.get("return_code", "0")
-        if return_code != "0":
+        # Check return code (API may return int or string)
+        return_code = data.get("return_code", 0)
+        # 0 또는 "0" 모두 성공으로 처리
+        if str(return_code) != "0":
             raise KiwoomAPIError(
                 f"Order failed with return_code: {return_code}",
                 response_data=data
