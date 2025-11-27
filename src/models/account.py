@@ -36,7 +36,12 @@ class Account(BaseModel):
     @field_validator("total_asset_value")
     @classmethod
     def validate_total_asset_value(cls, v: Decimal, info) -> Decimal:
-        """총 평가 금액이 예수금 이상인지 검증합니다.
+        """총 평가 금액을 검증합니다.
+
+        Note:
+            API 응답에서 cash_balance(주문가능금액)와 total_asset_value(예수금)의
+            관계가 항상 일관되지 않을 수 있으므로 (미수금, D+1/D+2 결제 등)
+            검증을 수행하지 않고 값을 그대로 반환합니다.
 
         Args:
             v: 검증할 총 평가 금액.
@@ -44,13 +49,7 @@ class Account(BaseModel):
 
         Returns:
             검증된 총 평가 금액.
-
-        Raises:
-            ValueError: 총 평가 금액이 예수금보다 작을 경우.
         """
-        cash_balance = info.data.get("cash_balance")
-        if cash_balance and v < cash_balance:
-            raise ValueError("총 평가 금액은 예수금보다 작을 수 없습니다")
         return v
 
     def is_daily_loss_limit_exceeded(self) -> bool:

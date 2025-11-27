@@ -452,10 +452,18 @@ class DashboardDataPublisher:
         """Build list of DashboardPosition from trading positions.
 
         Returns:
-            List of DashboardPosition
+            List of DashboardPosition (only positions with quantity > 0)
         """
         result = []
         for stock_code, pos in self.positions.items():
+            # Skip positions with zero quantity (fully closed positions)
+            if pos.quantity <= 0:
+                continue
+
+            # Skip positions with zero average buy price (invalid state)
+            if pos.average_buy_price <= 0:
+                continue
+
             # Get stock name from cache (sync)
             stock_name = self._get_stock_name(stock_code)
 
