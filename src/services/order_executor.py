@@ -757,9 +757,12 @@ class OrderExecutor:
                     )
                 else:
                     # 신규 포지션 생성
+                    # WebSocket returns 10-digit account (base + sub-account code)
+                    # Position model expects 8-digit base account number
                     from ..models.position import Position as PositionModel
+                    base_account = event.account_number[:8]
                     new_position = PositionModel(
-                        account_number=event.account_number,
+                        account_number=base_account,
                         stock_code=stock_code,
                         quantity=event.holding_quantity,
                         average_buy_price=event.average_price,
