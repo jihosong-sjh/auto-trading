@@ -553,6 +553,36 @@ class StrategyEngine:
         Args:
             stock: 평가할 종목 데이터.
         """
+        # 포지션 가격 실시간 업데이트 (자동 매도 조건 평가를 위해 필수)
+        # WebSocket 연결 실패 시에도 시세 데이터로 포지션 가격을 업데이트
+        if self.positions and stock.stock_code in self.positions:
+            position = self.positions[stock.stock_code]
+            old_price = position.current_price
+            position.update_price(stock.current_price)
+
+            return_rate = float(position.return_rate)
+
+            # 익절(+1%) 또는 손절(-0.8%) 임계값 근처면 INFO 레벨로 출력
+            if return_rate >= 0.008:  # 0.8% 이상 수익 (익절 임박)
+                logger.info(
+                    f"[Position] {stock.stock_code}: "
+                    f"{stock.current_price:,.0f}원, "
+                    f"수익률: {return_rate:+.2%} (익절 임계값: +1.0%)"
+                )
+            elif return_rate <= -0.006:  # -0.6% 이하 손실 (손절 임박)
+                logger.warning(
+                    f"[Position] {stock.stock_code}: "
+                    f"{stock.current_price:,.0f}원, "
+                    f"수익률: {return_rate:+.2%} (손절 임계값: -0.8%)"
+                )
+            # 일반적인 수익률 변화는 DEBUG 레벨
+            elif abs(return_rate) >= 0.001:
+                logger.debug(
+                    f"[Position Update] {stock.stock_code}: "
+                    f"{old_price:,.0f} -> {stock.current_price:,.0f}원, "
+                    f"수익률: {return_rate:+.2%}"
+                )
+
         # T087: 위험 관리 검증 (주문 전)
         if self.account and self.positions is not None:
             should_stop, risk_message = self.risk_manager.should_stop_trading(
