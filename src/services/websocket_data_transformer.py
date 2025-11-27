@@ -273,6 +273,8 @@ class WebSocketDataTransformer:
             high_price=trade.high_price if trade.high_price > 0 else None,
             low_price=trade.low_price if trade.low_price > 0 else None,
             volume=trade.cumulative_volume,
+            change=trade.price_change,
+            change_rate=trade.change_rate,
             updated_at=trade.timestamp,
         )
 

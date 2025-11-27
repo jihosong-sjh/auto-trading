@@ -34,6 +34,8 @@ class Stock(BaseModel):
         high_price: 고가.
         low_price: 저가.
         volume: 거래량.
+        change: 전일 대비 변동액.
+        change_rate: 전일 대비 변동률.
         updated_at: 마지막 가격 업데이트 시간 (KST).
     """
 
@@ -45,6 +47,8 @@ class Stock(BaseModel):
     high_price: Optional[Decimal] = Field(None, description="고가")
     low_price: Optional[Decimal] = Field(None, description="저가")
     volume: int = Field(default=0, ge=0, description="거래량")
+    change: Optional[Decimal] = Field(None, description="전일 대비 변동액")
+    change_rate: Optional[Decimal] = Field(None, description="전일 대비 변동률")
     updated_at: datetime = Field(default_factory=get_kst_now, description="마지막 업데이트 시간")
 
     @field_validator("high_price")
