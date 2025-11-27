@@ -33,6 +33,8 @@ except ImportError:
 # TimescaleDB 관련 임포트
 try:
     from ..timeseries.database import TimeSeriesDB
+    from ..timeseries.collector import DataCollector as TimeSeriesDataCollector
+    from ..timeseries.models import OrderHistory, BalanceHistory
     from ..utils.timescale_log_handler import AsyncTimescaleLogHandler
     TIMESCALEDB_AVAILABLE = True
 except ImportError:
@@ -116,6 +118,7 @@ class TradingSystem:
         # TimescaleDB 관련
         self.tsdb: Optional[TimeSeriesDB] = None
         self.ts_log_handler: Optional[AsyncTimescaleLogHandler] = None
+        self.timeseries_collector: Optional[TimeSeriesDataCollector] = None
 
         # Prometheus 모니터링 관련
         self.metrics_collector: Optional[MetricsCollector] = None
@@ -221,11 +224,21 @@ class TradingSystem:
                 root_logger.addHandler(self.ts_log_handler)
                 logger.info("TimescaleDB log handler attached to root logger")
 
+                # TimeSeriesDataCollector 초기화 (주문/잔고/성능 지표 저장)
+                self.timeseries_collector = TimeSeriesDataCollector(
+                    db=self.tsdb,
+                    ws_client=None  # WebSocket 클라이언트는 나중에 설정
+                )
+                # start()에서 db.connect() 호출하지만 이미 연결됨, 플러시 루프만 시작
+                await self.timeseries_collector.start()
+                logger.info("TimeSeriesDataCollector initialized for order/balance/metrics storage")
+
             except Exception as e:
                 logger.error(f"Failed to initialize TimescaleDB: {e}", exc_info=True)
                 logger.warning("Continuing without TimescaleDB logging")
                 self.tsdb = None
                 self.ts_log_handler = None
+                self.timeseries_collector = None
         elif self.config.enable_timescaledb and not TIMESCALEDB_AVAILABLE:
             logger.warning(
                 "TimescaleDB is enabled in config but required dependencies "
@@ -388,7 +401,8 @@ class TradingSystem:
             positions=self.positions,
             risk_manager=None,  # Uses default RiskManager
             account_service=None,  # Will be set up later if needed
-            order_event_queue=self.order_event_queue  # Phase 6
+            order_event_queue=self.order_event_queue,  # Phase 6
+            timeseries_collector=self.timeseries_collector  # TimescaleDB 데이터 저장
         )
 
         # Initialize RiskMonitor (Phase 2)

@@ -10,11 +10,11 @@ Phase 6: order_event_queue 소비하여 실시간 주문 체결 상태 업데이
 import asyncio
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Dict, Optional, Protocol, Union
 from zoneinfo import ZoneInfo
 
 from ..api.exceptions import RateLimitExceededError
-from ..models import OrderStatus, OrderType
+from ..models import OrderStatus, OrderType, PriceType
 from ..models.account import Account
 from ..models.order import Order
 from ..models.position import Position
@@ -25,6 +25,9 @@ from .account_service import AccountService
 from .duplicate_checker import DuplicateOrderChecker
 from .order_validator import OrderValidator
 from .risk_manager import RiskManager
+
+if TYPE_CHECKING:
+    from ..timeseries.collector import DataCollector as TimeSeriesDataCollector
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_logger(__name__)
@@ -81,7 +84,8 @@ class OrderExecutor:
         positions: Dict[str, Position],
         risk_manager: Optional[RiskManager] = None,
         account_service: Optional[AccountService] = None,
-        order_event_queue: Optional[asyncio.Queue] = None
+        order_event_queue: Optional[asyncio.Queue] = None,
+        timeseries_collector: Optional["TimeSeriesDataCollector"] = None
     ):
         """OrderExecutor를 초기화합니다.
 
@@ -92,6 +96,7 @@ class OrderExecutor:
             risk_manager: 위험 관리자 (T086). None이면 기본 설정으로 생성.
             account_service: 계좌 서비스 (T071). None이면 자동 생성.
             order_event_queue: 주문/잔고 이벤트 큐 (Phase 6). WebSocket에서 수신.
+            timeseries_collector: TimescaleDB 데이터 수집기. 주문/잔고 이력 저장.
         """
         self.client = client
         self.pending_orders = pending_orders
@@ -117,6 +122,9 @@ class OrderExecutor:
         # T-DASH-006: Dashboard 데이터 발행용 callback
         # TradingSystem에서 DashboardDataPublisher.publish_trade()를 연결
         self.on_trade_filled_callback: Optional[callable] = None
+
+        # TimescaleDB 데이터 수집기 (주문/잔고 이력 저장)
+        self.timeseries_collector = timeseries_collector
 
     async def execute_order(self, order: Order) -> tuple[bool, Optional[str], Optional[Order]]:
         """주문을 검증하고 실행합니다.
@@ -231,6 +239,9 @@ class OrderExecutor:
                         await self.on_trade_filled_callback(filled_order, realized_pnl)
                     except Exception as e:
                         logger.error(f"Trade filled callback error: {e}")
+
+                # TimescaleDB에 주문 이력 저장
+                await self._save_order_to_timescale(filled_order)
 
                 # 진행 중인 주문에서 제거
                 self.pending_orders.pop(filled_order.order_id, None)
@@ -431,6 +442,9 @@ class OrderExecutor:
                 f"총 평가액={account.total_asset_value:,.0f}원, "
                 f"당일 손익={account.daily_pnl:+,.0f}원"
             )
+
+            # TimescaleDB에 잔고 이력 저장
+            await self._save_balance_to_timescale(account)
 
         except Exception as e:
             logger.error(
@@ -783,3 +797,100 @@ class OrderExecutor:
                 f"[Phase6] Error handling balance update event: {e}",
                 exc_info=True
             )
+
+    # =========================================================================
+    # TimescaleDB 데이터 저장 메서드
+    # =========================================================================
+
+    async def _save_order_to_timescale(self, filled_order: Order) -> None:
+        """체결된 주문을 TimescaleDB에 저장합니다.
+
+        Args:
+            filled_order: 체결된 주문.
+        """
+        if not self.timeseries_collector:
+            return
+
+        try:
+            # 런타임에 import하여 순환 참조 방지
+            from ..timeseries.models import (
+                OrderHistory,
+                OrderType as TSOrderType,
+                OrderStatus as TSOrderStatus,
+                PriceType as TSPriceType,
+            )
+
+            # Order 모델을 OrderHistory 모델로 변환
+            order_history = OrderHistory(
+                time=filled_order.submitted_at or datetime.now(tz=KST),
+                order_id=filled_order.order_id,
+                symbol=filled_order.stock_code,
+                order_type=TSOrderType.BUY if filled_order.order_type == OrderType.BUY else TSOrderType.SELL,
+                price_type=self._convert_price_type(filled_order.price_type),
+                quantity=filled_order.quantity,
+                price=filled_order.price,
+                executed_price=filled_order.filled_price,
+                executed_quantity=filled_order.filled_quantity,
+                status=TSOrderStatus.FILLED,
+                strategy=getattr(filled_order, 'strategy_name', None),
+                signal_reason=getattr(filled_order, 'signal_reason', None),
+            )
+
+            await self.timeseries_collector.collect_order(order_history)
+            logger.debug(f"Order saved to TimescaleDB: {filled_order.order_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to save order to TimescaleDB: {e}", exc_info=True)
+            # TimescaleDB 저장 실패는 주문 처리에 영향을 주지 않음
+
+    def _convert_price_type(self, price_type: PriceType) -> "TSPriceType":
+        """PriceType을 TimescaleDB용 PriceType으로 변환합니다."""
+        from ..timeseries.models import PriceType as TSPriceType
+
+        mapping = {
+            PriceType.LIMIT: TSPriceType.LIMIT,
+            PriceType.MARKET: TSPriceType.MARKET,
+        }
+        return mapping.get(price_type, TSPriceType.LIMIT)
+
+    async def _save_balance_to_timescale(self, account: Account) -> None:
+        """계좌 잔고를 TimescaleDB에 저장합니다.
+
+        Args:
+            account: 계좌 정보.
+        """
+        if not self.timeseries_collector:
+            return
+
+        try:
+            from ..timeseries.models import BalanceHistory, Position as TSPosition
+
+            # 현재 포지션 목록을 TimescaleDB 모델로 변환
+            ts_positions = []
+            for pos in self.positions.values():
+                ts_pos = TSPosition(
+                    symbol=pos.stock_code,
+                    quantity=pos.quantity,
+                    avg_price=pos.average_buy_price,
+                    current_price=pos.current_price,
+                    unrealized_pnl=pos.unrealized_pnl,
+                    realized_pnl=getattr(pos, 'realized_pnl', Decimal("0")),
+                )
+                ts_positions.append(ts_pos)
+
+            balance_history = BalanceHistory(
+                time=datetime.now(tz=KST),
+                account_id=account.account_number,
+                cash=account.cash_balance,
+                total_value=account.total_asset_value,
+                positions=ts_positions,
+                daily_pnl=account.daily_pnl,
+                total_pnl=getattr(account, 'total_pnl', None),
+            )
+
+            await self.timeseries_collector.collect_balance(balance_history)
+            logger.debug(f"Balance saved to TimescaleDB: {account.account_number}")
+
+        except Exception as e:
+            logger.error(f"Failed to save balance to TimescaleDB: {e}", exc_info=True)
+            # TimescaleDB 저장 실패는 계좌 처리에 영향을 주지 않음
